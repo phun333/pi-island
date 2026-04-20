@@ -1,0 +1,61 @@
+{
+  "name": "pi-island",
+  "version": "0.1.0",
+  "description": "macOS Dynamic-Island-style status capsule for the pi coding agent. Shows what pi is doing in real time, at the very top of your screen — with native notch-wrap support for MacBooks.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-coding-agent",
+    "pi-extension",
+    "macos",
+    "dynamic-island",
+    "notch",
+    "status-bar",
+    "agent-ui",
+    "webkit",
+    "wkwebview"
+  ],
+  "pi": {
+    "extensions": [
+      "./pi-extension/index.ts"
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "postinstall": "node scripts/postinstall.mjs",
+    "demo": "node pi-extension/demo.mjs",
+    "demo:single": "node pi-extension/demo.mjs single"
+  },
+  "files": [
+    "pi-extension/index.ts",
+    "pi-extension/island.html.mjs",
+    "pi-extension/open-fixed.mjs",
+    "pi-extension/companion.mjs",
+    "pi-extension/socket-path.mjs",
+    "pi-extension/island-host.swift",
+    "pi-extension/demo.mjs",
+    "scripts/build.mjs",
+    "scripts/postinstall.mjs",
+    "README.md",
+    "LICENSE"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phun333/pi-island.git"
+  },
+  "bugs": {
+    "url": "https://github.com/phun333/pi-island/issues"
+  },
+  "homepage": "https://github.com/phun333/pi-island#readme",
+  "author": "phun333",
+  "license": "MIT"
+}

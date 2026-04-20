@@ -1,0 +1,50 @@
+# ─── Node / npm ─────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+
+# Build artifacts — the native host binary is compiled per-machine on
+# install via scripts/postinstall.mjs. Never commit it.
+pi-extension/island-host-bin
+.build-skipped
+
+# ─── Environment / secrets ──────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─── Editor / IDE ───────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ─── macOS / OS cruft ───────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# ─── Windows / Linux cruft ──────────────────────────────────────────────
+ehthumbs.db
+Thumbs.db
+*.stackdump
+
+# ─── Logs & temp ────────────────────────────────────────────────────────
+*.log
+logs/
+*.tmp
+*.pid
+*.seed
+*.pid.lock
+
+# ─── pi session exports (local dev artifacts) ───────────────────────────
+pi-session-*.html
+pi-session-*.jsonl
+

@@ -30,6 +30,12 @@ Run pi in multiple terminals — each session gets its own row,
 stacked into one continuous capsule.
 
 
+## Website
+
+A minimal informational site lives in [`web/`](web/) — built with Next.js 16
+and the [pi.dev](https://pi.dev) palette, deployable to Vercel with
+`Root Directory = web`. See [`web/README.md`](web/README.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

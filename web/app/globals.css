@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/* ---------- pi.dev palette ---------- */
+:root {
+  /* surfaces */
+  --background: #ffffff;
+  --background-muted: #fafafa;
+  --foreground: oklch(0.145 0 0);
+  --foreground-dim: #777;
+  --border: #e5e5e5;
+  --border-strong: #aaa;
+
+  /* brand */
+  --accent: #f97316;          /* pi orange */
+  --accent-hover: #ea580c;
+  --accent-soft: #fff1e6;
+
+  /* links */
+  --link: #0066cc;
+  --link-hover: #0056b3;
+
+  /* terminal / code */
+  --terminal-bg: #18181b;
+  --terminal-border: #27272a;
+  --terminal-text: #fafafa;
+  --terminal-dim: #a1a1aa;
+
+  /* highlight (agentation-style mark) */
+  --mark-bg: #ffe6d1;         /* soft orange tint over accent */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-foreground-dim: var(--foreground-dim);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-link: var(--link);
+  --color-terminal-bg: var(--terminal-bg);
+  --color-terminal-border: var(--terminal-border);
+  --color-terminal-text: var(--terminal-text);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+}
+
+::selection {
+  background: var(--mark-bg);
+  color: var(--foreground);
+}
+
+/* Smooth anchor scrolling with sidebar offset */
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 2rem;
+}
+
+/* Custom utility: agentation-style highlight (soft filled bg) */
+.mark-highlight {
+  background: var(--mark-bg);
+  padding: 0 0.15em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Custom utility: hand-drawn underline for accent words */
+.mark-underline {
+  position: relative;
+  white-space: nowrap;
+}
+.mark-underline::after {
+  content: "";
+  position: absolute;
+  left: -0.05em;
+  right: -0.05em;
+  bottom: 0.02em;
+  height: 0.07em;
+  background: var(--accent);
+  border-radius: 999px;
+  transform: rotate(-0.6deg);
+  opacity: 0.95;
+}

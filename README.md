@@ -6,6 +6,7 @@ Pinned at the top of your screen, live on every turn.
 
 <video src="https://github.com/phun333/pi-island/raw/main/assets/demo.mov" controls muted autoplay playsinline width="640"></video>
 
+<video controls src="assets/demo.mov" title="Title"></video>
 ---
 
 ## Install

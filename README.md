@@ -4,7 +4,7 @@ A macOS Dynamic-Island-style status capsule for the
 [pi coding agent](https://github.com/badlogic/pi-mono).
 Pinned at the top of your screen, live on every turn.
 
-<video src="./assets/demo.mov" controls muted autoplay playsinline width="640"></video>
+<video src="https://github.com/phun333/pi-island/raw/main/assets/demo.mov" controls muted autoplay playsinline width="640"></video>
 
 ---
 

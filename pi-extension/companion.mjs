@@ -27,17 +27,34 @@ import { buildIslandHTML } from "./island.html.mjs";
 import { SOCK } from "./socket-path.mjs";
 
 // ---- Screen geometry ------------------------------------------------------
-// Same JXA probe used by earlier single-window mode. We target NSScreen.
-// screens[0] (the primary / menu-bar screen) so the window stays put when
-// focus moves between displays.
+// Find the screen to host the island on. Strategy:
+//   1. Screen under the mouse cursor (what the user is looking at right now).
+//   2. NSScreen.mainScreen  (menu-bar / focused screen).
+//   3. NSScreen.screens[0]  (last-resort, documented as arbitrary order).
+//
+// We return the screen's *global* origin in addition to its size, so the
+// caller can place the window in the global coordinate space instead of
+// accidentally using screen-local coords as global ones (which lands the
+// window in a random spot on multi-monitor setups).
 function getScreenGeometry() {
   try {
     const script =
       "ObjC.import('AppKit');" +
-      "const s = $.NSScreen.screens.js[0];" +
+      "const mouse = $.NSEvent.mouseLocation;" +
+      "const all = $.NSScreen.screens.js;" +
+      "let s = null;" +
+      "for (const scr of all) {" +
+      "  const f = scr.frame;" +
+      "  if (mouse.x >= f.origin.x && mouse.x < f.origin.x + f.size.width &&" +
+      "      mouse.y >= f.origin.y && mouse.y < f.origin.y + f.size.height) {" +
+      "    s = scr; break;" +
+      "  }" +
+      "}" +
+      "if (!s) s = $.NSScreen.mainScreen;" +
+      "if (!s || !s.frame) s = all[0];" +
       "const f = s.frame;" +
       "const sa = (s.safeAreaInsets && s.safeAreaInsets.top) || 0;" +
-      "JSON.stringify({w: f.size.width, h: f.size.height, notch: sa})";
+      "JSON.stringify({x: f.origin.x, y: f.origin.y, w: f.size.width, h: f.size.height, notch: sa})";
     const out = execSync(`osascript -l JavaScript -e ${JSON.stringify(script)}`, {
       encoding: "utf8",
       timeout: 1500,
@@ -45,13 +62,15 @@ function getScreenGeometry() {
     const j = JSON.parse(out);
     if (Number.isFinite(j.w) && Number.isFinite(j.h)) {
       return {
+        x:      Math.round(j.x || 0),
+        y:      Math.round(j.y || 0),
         width:  Math.round(j.w),
         height: Math.round(j.h),
         notch:  Math.round(j.notch || 0),
       };
     }
   } catch { /* fall through */ }
-  return { width: 1440, height: 900, notch: 0 };
+  return { x: 0, y: 0, width: 1440, height: 900, notch: 0 };
 }
 
 // ---- Window setup ---------------------------------------------------------
@@ -61,9 +80,18 @@ function getScreenGeometry() {
 const WIN_W = 640;
 const WIN_H = 420; // room for ~10 rows comfortably
 
-const { width: screenW, height: screenH, notch: notchH } = getScreenGeometry();
-const x = Math.max(0, Math.round((screenW - WIN_W) / 2));
-const y = Math.max(0, screenH - WIN_H);
+const {
+  x: screenX,
+  y: screenY,
+  width:  screenW,
+  height: screenH,
+  notch:  notchH,
+} = getScreenGeometry();
+
+// Place the window top-center of the *active* screen, in the global
+// coordinate space (macOS uses bottom-left origin; larger y = further up).
+const x = Math.round(screenX + (screenW - WIN_W) / 2);
+const y = Math.round(screenY + screenH - WIN_H);
 
 const autoMode = notchH > 0 ? "notch" : "normal";
 

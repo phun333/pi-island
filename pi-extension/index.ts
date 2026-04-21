@@ -18,12 +18,38 @@ import { spawn } from "node:child_process";
 import { basename, join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { SOCK } from "./socket-path.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const COMPANION = join(HERE, "companion.mjs");
 const SESSION_ID = randomUUID().slice(0, 8);
+
+// ── Persistent user preference ─────────────────────────────────────────────
+// The capsule is ON by default — users installed this extension because they
+// want to see it. Typing `/island` toggles OFF and persists the choice in
+// ~/.pi/pi-island.json so every future pi session respects it without the
+// user having to retype the command. Typing `/island` again flips it back ON.
+const PREF_DIR  = join(homedir(), ".pi");
+const PREF_FILE = join(PREF_DIR, "pi-island.json");
+
+function readPreference(): boolean {
+  try {
+    if (!existsSync(PREF_FILE)) return true; // default ON
+    const data = JSON.parse(readFileSync(PREF_FILE, "utf8"));
+    return data?.enabled !== false;
+  } catch {
+    return true;
+  }
+}
+
+function writePreference(enabled: boolean): void {
+  try {
+    if (!existsSync(PREF_DIR)) mkdirSync(PREF_DIR, { recursive: true });
+    writeFileSync(PREF_FILE, JSON.stringify({ enabled }, null, 2) + "\n");
+  } catch { /* best-effort — don't crash the session over a cache file */ }
+}
 
 // ── tool name → island state (matches pi's built-in tool set) ──────────────
 interface IslandUpdate {
@@ -61,7 +87,10 @@ export default function (pi: ExtensionAPI) {
   // ── Client state ─────────────────────────────────────────────────────────
   let sock: Socket | null = null;
   let connecting = false;
-  let shownForSession = false;        // /island → on, /island (again) → off
+  // Default-on: read persisted preference. First-time users see the island
+  // immediately; users who've previously typed /island to disable stay
+  // disabled across restarts.
+  let shownForSession = readPreference();
   let hideTimer: NodeJS.Timeout | null = null;
 
   const project = basename(process.cwd());
@@ -215,19 +244,21 @@ export default function (pi: ExtensionAPI) {
     hideTimer = setTimeout(async () => { await sendRemove(); }, 5000);
   });
 
-  // ── /island command — toggle visibility for this pi session ──────────────
+  // ── /island command — toggle visibility (persisted across sessions) ──────
   pi.registerCommand("island", {
-    description: "Toggle the pi Dynamic Island for this session",
+    description: "Toggle the pi Dynamic Island (remembers your choice)",
     handler: async (_args, ctx) => {
       if (shownForSession) {
         shownForSession = false;
+        writePreference(false);
         if (hideTimer) clearTimeout(hideTimer);
         await sendRemove();
-        ctx.ui.notify("Island hidden for this session", "info");
+        ctx.ui.notify("Island disabled — won't appear until you /island again", "info");
       } else {
         shownForSession = true;
+        writePreference(true);
         await ensureConnection();
-        ctx.ui.notify("Island shown for this session", "info");
+        ctx.ui.notify("Island enabled — will auto-show on every pi session", "info");
       }
     },
   });
@@ -237,6 +268,7 @@ export default function (pi: ExtensionAPI) {
     description: "Force the companion into notch-wrap layout",
     handler: async (_args, ctx) => {
       shownForSession = true;
+      writePreference(true);
       if (!(await ensureConnection())) {
         ctx.ui.notify("Couldn't reach the island companion", "error");
         return;

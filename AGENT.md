@@ -152,11 +152,15 @@ README color table.
 ### 4.5. The `/island` vs `/island2` commands
 
 Both commands are registered in `index.ts` via `pi.registerCommand`.
+Since **v0.1.1** the island is ON by default — user preference is
+persisted in `~/.pi/pi-island.json` (`{"enabled": true|false}`) and
+read on extension load. `/island` flips + writes the new value, so the
+choice survives every pi restart until explicitly toggled again.
 
-| Command     | Effect on THIS pi session                                              |
-|-------------|------------------------------------------------------------------------|
-| `/island`   | Toggle `shownForSession`. Off → we stop sending updates, row disappears. On → updates resume (capsule appears once agent is working). |
-| `/island2`  | Force `shownForSession = true` AND send `{type:"mode", mode:"notch"}` to the companion, which reapplies on all rows. |
+| Command     | Effect                                                                                            |
+|-------------|---------------------------------------------------------------------------------------------------|
+| `/island`   | Toggle visibility AND persist to `~/.pi/pi-island.json`. Off → row retracts, no updates sent. On → capsule appears on next agent turn. |
+| `/island2`  | Force `shownForSession = true`, persist enabled, AND send `{type:"mode", mode:"notch"}` to the companion. |
 
 **Known limitation:** there is no `/island3` or "go back to normal
 mode" toggle. If you hit `/island2` on a non-notched Mac and want
@@ -343,6 +347,7 @@ back (e.g. click-to-dismiss).
 - ✅ Middle slot is pixel-stable (absolute centered)
 - ✅ Auto idle-exit of companion 6 s after last client disconnects
 - ✅ GitHub Actions auto-publish on `v*` tag push
+- ✅ Default-on with persisted user preference (v0.1.1)
 
 ---
 

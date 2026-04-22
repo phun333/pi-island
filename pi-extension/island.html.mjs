@@ -20,6 +20,15 @@ export function buildIslandHTML() {
 <head>
 <meta charset="utf-8">
 <style>
+/* ---------- Global scale ----------
+ * One CSS custom property drives font-size, row-height, padding, gap and
+ * meta sizing. window.island.setScale(name) flips it at runtime.
+ * Row width and slot geometry (130/150/auto) stay FIXED so the absolute-
+ * centered middle slot keeps its pixel-stable position regardless of
+ * user-picked scale. Text inside scaled slots ellipsises naturally when
+ * it runs out of room. */
+:root { --scale: 1; }
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
   width: 100%;
@@ -56,9 +65,13 @@ html, body {
   color: #fff;
   /* Default: square corners. First / last get rounded below. */
   border-radius: 0;
-  width: 460px;
-  height: 34px;
-  padding: 0 14px;
+  /* Width scales together with font-size so the left/middle/right slot
+   * proportions stay balanced — otherwise the middle-slot prompt text
+   * looks visually squeezed at larger scales. At scale 1.18 (large) the
+   * row is 543px wide, which still fits inside the 640px host window. */
+  width: calc(460px * var(--scale));
+  height: calc(34px * var(--scale));
+  padding: 0 calc(14px * var(--scale));
   /* The row uses a simple flex for left/right slots. The MIDDLE slot is
    * absolutely positioned at the row's geometric center (see .slot.mid)
    * so its text never shifts by a single pixel when the right-side label
@@ -69,8 +82,8 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  font-size: 11.5px;
+  gap: calc(10px * var(--scale));
+  font-size: calc(11.5px * var(--scale));
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -85,7 +98,7 @@ html, body {
 }
 .row.visible {
   opacity: 1;
-  max-height: 34px;
+  max-height: calc(34px * var(--scale));
 }
 
 /* Hairline between consecutive rows so they look stacked, not monolithic. */
@@ -95,21 +108,42 @@ html, body {
  * continuous "capsule" look regardless of how many rows are stacked.
  * No drop-shadow: the capsule is pure black against whatever sits below
  * it, just like the real iPhone Dynamic Island. */
-.row.visible:last-of-type { border-radius: 0 0 22px 22px; }
+.row.visible:last-of-type {
+  border-radius: 0 0 calc(22px * var(--scale)) calc(22px * var(--scale));
+}
 
 /* Notch mode: the FIRST row's middle is always empty (the notch lives
  * there). Subsequent rows (below the notch) behave like normal pills. */
 body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
 
+/* Notch mode, first row only: abbreviate the elapsed timer by hiding
+ * its "sub" part (the seconds after "Xm" or the minutes after "Xh").
+ * The right slot grows leftward as the timer widens and on a notched
+ * MacBook the right slot's left edge would otherwise slide behind the
+ * notch (~225–430px in from the left). With abbreviation the timer
+ * plateaus at 3–4 chars ("16m", "1h", "12h") instead of climbing to 7+
+ * chars ("16m 52s", "12h 34m"), which is enough headroom for the
+ * status label + ctx% to clear the notch cleanly. Rows BELOW the notch
+ * (second + onwards) keep the full readout — they sit under the menu
+ * bar and have no clipping issue. */
+body.notch-mode .row:first-child .t-sub { display: none; }
+
 .slot {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: calc(7px * var(--scale));
   min-width: 0;
 }
-/* Left & right live in the flex row, shrinking naturally but keeping
- * their positions pinned to the row edges. */
-.slot.left  { flex: 0 0 auto; }
+/* Left & right live in the flex row. Left gets a hard max-width so a
+ * long project name (e.g. a deeply-nested repo folder) can't visually
+ * crash into the absolutely-centered middle slot. The project <span>
+ * inside gets text-overflow: ellipsis so the truncation is graceful. */
+.slot.left  {
+  flex: 0 1 auto;
+  max-width: calc(130px * var(--scale));
+  min-width: 0;
+  overflow: hidden;
+}
 .slot.right { flex: 0 0 auto; }
 /* Middle is absolutely centered on the row. Because it's out of flow,
  * its position is defined ONLY by the row's width — independent of the
@@ -123,17 +157,19 @@ body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
   transform: translateX(-50%);
   justify-content: center;
   overflow: hidden;
-  /* Keep clear of left/right slots: row is 460px, padding 14*2=28,
-   * left ≈ 130, right ≈ 170, plus a little breathing room. */
-  max-width: 150px;
+  /* Keep clear of left/right slots: at scale 1.0 row is 460px, padding
+   * 14*2=28, left ≤ 130, right ≈ 170, plus a little breathing room. All
+   * proportions scale together via var(--scale) so the middle slot grows
+   * the prompt area at large sizes instead of clipping aggressively. */
+  max-width: calc(150px * var(--scale));
   pointer-events: none;
 }
 
 .braille {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 13px;
+  font-size: calc(13px * var(--scale));
   line-height: 1;
-  width: 13px;
+  width: calc(13px * var(--scale));
   text-align: center;
   flex-shrink: 0;
   display: inline-block;
@@ -143,14 +179,20 @@ body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
   color: rgba(255,255,255,0.96);
   font-weight: 600;
   letter-spacing: -0.1px;
-  flex-shrink: 0;
+  /* Truncate long project names with an ellipsis instead of letting the
+   * left slot overflow into the middle slot. min-width: 0 is required
+   * on flex items for text-overflow: ellipsis to actually kick in. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sep    { color: rgba(255,255,255,0.28); flex-shrink: 0; }
 .status { color: rgba(255,255,255,0.92); flex-shrink: 0; }
 .detail {
   color: rgba(255,255,255,0.62);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 10.5px;
+  font-size: calc(10.5px * var(--scale));
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
@@ -169,13 +211,13 @@ body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
 .prompt::after  { content: '\u201D'; opacity: 0.5; margin-left: 1px; }
 
 .meta {
-  padding-left: 8px;
+  padding-left: calc(8px * var(--scale));
   border-left: 1px solid rgba(255,255,255,0.12);
   color: rgba(255,255,255,0.55);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  font-size: 10px;
+  font-size: calc(10px * var(--scale));
   display: flex;
-  gap: 6px;
+  gap: calc(6px * var(--scale));
   align-items: center;
   flex-shrink: 0;
 }
@@ -213,20 +255,44 @@ body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
   var tickerB = null; // braille ticker
   var tickerT = null; // elapsed-time ticker
 
+  // Size presets — applied by flipping the --scale custom property on
+  // <html>. Everything in the CSS that uses calc(... * var(--scale))
+  // picks it up instantly; no respawn of the companion needed.
+  //
+  // xlarge's 1.35 is the practical ceiling: at that factor the row is
+  // 460*1.35 = 621px wide, leaving ~19px of clickThrough breathing room
+  // inside the 640px host window. Bumping it higher would require
+  // widening WIN_W in companion.mjs too.
+  var SCALES = { small: 0.88, medium: 1.0, large: 1.18, xlarge: 1.35 };
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
-  function fmtElapsed(ms) {
-    if (ms < 1000) return (ms / 1000).toFixed(1) + 's';
+  // Split the elapsed readout into a "main" unit and a "sub" unit so the
+  // notch CSS above can hide only the sub part without JS awareness of
+  // notch state. main is always visible ("16m", "1h", "42s"); sub is the
+  // next-finer unit with a leading space (" 52s", " 23m") and gets
+  // display:none inside the notched first row.
+  //
+  // Sub-second resolution is deliberately NOT shown — the readout jumps
+  // straight from 0s → 1s → 2s. Tenths-of-a-second jitter feels twitchy
+  // on a status capsule, and the braille spinner already signals "alive".
+  function fmtElapsedParts(ms) {
     var s = Math.floor(ms / 1000);
-    if (s < 60) return s + 's';
+    if (s < 60) return { main: s + 's', sub: '' };
     var m = Math.floor(s / 60); s = s % 60;
-    if (m < 60) return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+    if (m < 60) return { main: m + 'm', sub: ' ' + (s < 10 ? '0' : '') + s + 's' };
     var h = Math.floor(m / 60); m = m % 60;
-    return h + 'h ' + (m < 10 ? '0' : '') + m + 'm';
+    return { main: h + 'h', sub: ' ' + (m < 10 ? '0' : '') + m + 'm' };
+  }
+
+  function fmtElapsedHTML(ms) {
+    var f = fmtElapsedParts(ms);
+    return '<span class="t-main">' + f.main + '</span>' +
+           '<span class="t-sub">'  + f.sub  + '</span>';
   }
 
   function anySpinning() {
@@ -267,7 +333,10 @@ body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
           if (r.data.frozenElapsed != null) continue;
           var el = r.el.querySelector('.t-elapsed');
           if (el && r.data.startedAt) {
-            el.textContent = fmtElapsed(Date.now() - r.data.startedAt);
+            // innerHTML (not textContent) because the timer is now two
+            // nested spans — .t-main + .t-sub — so notch CSS can hide the
+            // sub part independently.
+            el.innerHTML = fmtElapsedHTML(Date.now() - r.data.startedAt);
           }
         }
         if (!anyRunning()) { clearInterval(tickerT); tickerT = null; }
@@ -301,7 +370,7 @@ body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
       right += '<div class="meta">';
       if (d.startedAt) {
         var t = d.frozenElapsed != null ? d.frozenElapsed : (Date.now() - d.startedAt);
-        right += '<span class="mono t-elapsed">' + fmtElapsed(t) + '</span>';
+        right += '<span class="mono t-elapsed">' + fmtElapsedHTML(t) + '</span>';
       }
       if (d.ctxPct != null) {
         if (d.startedAt) right += '<span class="sep">\u00b7</span>';
@@ -318,10 +387,24 @@ body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
       '<div class="slot right">' + right + '</div>';
   }
 
+  // Optional per-row scale override. Primarily used by the "sizes" demo
+  // to stack one row of each preset for promo screenshots. Sets --scale
+  // inline on the row element so it wins over the :root global scale
+  // via the normal CSS cascade (everything in .row uses calc() on
+  // var(--scale), which picks up whichever --scale is closest on an
+  // ancestor — inline style on the row itself is the closest). Leaving
+  // it undefined keeps the row on the global scale.
+  function applyRowScale(el, data) {
+    if (typeof data.rowScale === 'string' && SCALES[data.rowScale] != null) {
+      el.style.setProperty('--scale', String(SCALES[data.rowScale]));
+    }
+  }
+
   function upsertRow(id, data) {
     var existing = rows[id];
     if (existing && !existing.removing) {
       existing.data = Object.assign({}, existing.data, data);
+      applyRowScale(existing.el, data);
       renderRowContent(existing);
       startTickers();
       return;
@@ -335,6 +418,7 @@ body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
     rows[id] = row;
     order.push(id);
     stack.appendChild(el);
+    applyRowScale(el, data);
     renderRowContent(row);
 
     // Trigger enter animation on next frame
@@ -364,10 +448,17 @@ body.notch-mode .row:first-child .slot.mid { visibility: hidden; }
     document.body.className = mode === 'notch' ? 'notch-mode' : '';
   }
 
+  function setScale(scale) {
+    var factor = SCALES[scale];
+    if (factor == null) factor = SCALES.medium;
+    document.documentElement.style.setProperty('--scale', String(factor));
+  }
+
   window.island = {
     upsertRow: upsertRow,
     removeRow: removeRow,
     setMode: setMode,
+    setScale: setScale,
   };
 })();
 </script>

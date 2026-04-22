@@ -32,9 +32,9 @@
 
     "pack:test": "node scripts/pack-test.mjs",
 
-    "release:patch": "npm version patch -m 'chore: release v%s' && git push --follow-tags && npm publish",
-    "release:minor": "npm version minor -m 'chore: release v%s' && git push --follow-tags && npm publish",
-    "release:major": "npm version major -m 'chore: release v%s' && git push --follow-tags && npm publish"
+    "release:patch": "npm version patch -m 'chore: release v%s' && git push --follow-tags && echo '✓ tag pushed — GitHub Actions (.github/workflows/publish.yml) will publish to npm'",
+    "release:minor": "npm version minor -m 'chore: release v%s' && git push --follow-tags && echo '✓ tag pushed — GitHub Actions (.github/workflows/publish.yml) will publish to npm'",
+    "release:major": "npm version major -m 'chore: release v%s' && git push --follow-tags && echo '✓ tag pushed — GitHub Actions (.github/workflows/publish.yml) will publish to npm'"
   },
   "files": [
     "pi-extension/index.ts",

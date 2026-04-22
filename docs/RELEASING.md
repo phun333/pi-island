@@ -120,7 +120,15 @@ Each of these:
 2. Creates a commit `chore: release v<version>`.
 3. Creates a git tag `v<version>`.
 4. Pushes commits **and** tags (`git push --follow-tags`).
-5. Runs `npm publish`.
+5. Prints a confirmation line — the actual `npm publish` is handled by
+   [`.github/workflows/publish.yml`](../.github/workflows/publish.yml),
+   which fires on every `v*` tag push and uses the repo's `NPM_TOKEN`
+   secret to authenticate. This avoids needing a local `npm login` and
+   keeps publish provenance tied to the GitHub Actions runner.
+
+Watch the workflow finish on [the Actions tab](https://github.com/phun333/pi-island/actions)
+before announcing the release. It usually takes ~1–2 min (macOS runner
+compiles the Swift host during `npm install`).
 
 After it finishes, optionally create a GitHub release with notes:
 

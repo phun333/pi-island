@@ -86,7 +86,7 @@ Three processes, three protocols:
    `open-fixed.mjs` (see §7: host binary protocol).
 3. **companion → WebView JS** — `win.send(js)` calls `evaluateJavaScript`
    inside the Swift host. The JS exposes `window.island.{upsertRow,
-   removeRow, setMode}` (see `island.html.mjs`).
+   removeRow, setMode, setScale}` (see `island.html.mjs`).
 
 Inside the WebView, a single 80 ms braille ticker and a single 250 ms
 elapsed ticker update all rows in sync. Rows are merged via
@@ -145,31 +145,55 @@ README color table.
 
 - Context: `ctx.getContextUsage()?.percent`, rounded. Shown as `34%`.
   Color gates: ≥60 → amber, ≥85 → red.
-- Timer: `(Date.now() - startedAt) / 1000`, formatted `1.2s / 42s /
-  1m 47s / 2h 15m`. Note the space between `1m` and `47s` — user-
-  requested readability fix, don't collapse.
+- Timer: `(Date.now() - startedAt) / 1000`, formatted as integer
+  seconds — `0s / 42s / 16m / 16m 52s / 2h 15m`. Note the space
+  between `1m` and `47s` — user-requested readability fix, don't
+  collapse. The "sub" unit (` 52s` after `16m`, ` 15m` after `2h`) is
+  a separate span so notch mode can `display:none` it independently
+  — in the notched first row the readout stays at 3–4 chars (`16m`,
+  `1h`, `12h`) so the growing timer never slides behind the notch.
 
-### 4.5. The `/island` vs `/island2` commands
+### 4.5. The `/island` command (v0.2.0+)
 
-Both commands are registered in `index.ts` via `pi.registerCommand`.
-Since **v0.1.1** the island is ON by default — user preference is
-persisted in `~/.pi/pi-island.json` (`{"enabled": true|false}`) and
-read on extension load. `/island` flips + writes the new value, so the
-choice survives every pi restart until explicitly toggled again.
+`/island` is the single entry point — no more `/island2`. With no args it
+opens a settings menu rendered via `ctx.ui.custom()` + pi-tui's
+`SettingsList` (the same drop-down UX as pi's own `/settings`). Four
+rows, each Enter/Space cycles its values:
 
-| Command     | Effect                                                                                            |
-|-------------|---------------------------------------------------------------------------------------------------|
-| `/island`   | Toggle visibility AND persist to `~/.pi/pi-island.json`. Off → row retracts, no updates sent. On → capsule appears on next agent turn. |
-| `/island2`  | Force `shownForSession = true`, persist enabled, AND send `{type:"mode", mode:"notch"}` to the companion. |
+| Setting      | Values                               | Apply method                           |
+|--------------|--------------------------------------|----------------------------------------|
+| Visibility   | `enabled` / `disabled`               | Live (send remove / ensureConnection). |
+| Size         | `small` / `medium` / `large` / `xlarge` | Live (socket `scale` message).      |
+| Screen       | `primary` / `active` / `2` / `3` …  | Respawn companion (NSWindow fixed).    |
+| Notch wrap   | `auto` / `normal` / `notch`          | Respawn companion (read at spawn).     |
 
-**Known limitation:** there is no `/island3` or "go back to normal
-mode" toggle. If you hit `/island2` on a non-notched Mac and want
-the middle content back, you have to kill the companion
-(`pkill -f companion.mjs`) and `/island` again. Tracked in §11.
+All four fields are persisted in `~/.pi/pi-island.json`:
+```json
+{ "enabled": true, "scale": "medium", "screen": "primary", "notchMode": "auto" }
+```
+Missing fields fall back to defaults, so a v0.1.x pref file (just
+`{"enabled": true}`) upgrades cleanly with no user action.
 
-The companion ALSO auto-detects the notch on spawn via JXA
-`safeAreaInsets.top`. So on a MacBook with a notch, you get notch mode
-automatically without typing `/island2`.
+**Quick-action subcommands** (skip the menu — same helpers, same persistence):
+```
+/island on | enable | off | disable | toggle
+/island size   <small|medium|large|xlarge>
+/island screen <primary|active|2|3|...>
+/island notch  <auto|normal|notch>
+```
+
+**Removed in v0.2.0:** `/island2`. Its behaviour (force notch wrap)
+moved into the menu's `Notch wrap` row — and unlike the old command,
+there is now an `auto` value to revert to detection mode. Release notes
+flagged this as a breaking change.
+
+The companion still auto-detects the notch on spawn via JXA
+`safeAreaInsets.top` whenever `notchMode` resolves to `auto`.
+
+**See also:** helpers live in `index.ts` — `doEnable/doDisable/
+doSetScale/doSetScreen/doSetNotchMode`, `openSettingsMenu`,
+`respawnCompanion`. Menu and subcommands share the same helpers so
+behaviour can't drift.
 
 ---
 
@@ -182,20 +206,29 @@ One JSON object per line. Writer: `writeMessage` in `index.ts`. Reader:
 // Client → companion, normal update (most common)
 { "id":             "<8-char-uuid>",   // stable per pi session (randomUUID().slice(0,8))
   "type":           "update",
-  "project":        "pi-auth",         // basename(cwd)
+  "project":        "pi-auth",         // basename(cwd), truncated to ≤20 chars
   "status":         "editing",         // see STATUS table in island.html.mjs
   "detail":         "login.ts",        // optional, tool-specific short string
   "prompt":         "fix the auth…",   // already truncated to ≤48 chars
   "ctxPct":         34,                // 0-100, null if unknown
   "startedAt":      1713622000000,     // ms epoch, set on agent_start
-  "frozenElapsed":  null               // non-null ms = stop ticking timer
+  "frozenElapsed":  null,              // non-null ms = stop ticking timer
+  "rowScale":       "large"            // optional, DEMO-ONLY per-row scale override
 }
 
 // Remove a row (pi session retracted or shut down)
 { "id": "...", "type": "remove" }
 
-// Force notch mode on the WebView
-{ "id": "...", "type": "mode", "mode": "normal" | "notch" }
+// Notch mode — flips body.notch-mode class in the WebView (live, no respawn)
+{ "id": "...", "type": "mode",    "mode":  "normal" | "notch" }
+
+// Size preset — flips the global --scale CSS var (live, no respawn)
+{ "id": "...", "type": "scale",   "scale": "small" | "medium" | "large" | "xlarge" }
+
+// Graceful companion shutdown — client's next ensureConnection() spawns a
+// fresh instance that re-reads ~/.pi/pi-island.json (used for screen and
+// notchMode changes where NSWindow geometry is fixed at spawn).
+{ "id": "...", "type": "respawn" }
 ```
 
 **Required vs optional:**
@@ -214,14 +247,33 @@ thinking | reading | editing | writing | running | searching | done | error
 
 Unknown statuses fall back to `thinking` visual.
 
+**Preference schema** (`~/.pi/pi-island.json`) — owned by `index.ts`,
+but also read directly by `companion.mjs` on spawn for `screen` and
+`notchMode` (settings that determine NSWindow geometry and can't be
+changed without a fresh window). All fields are optional; missing
+values fall back to defaults.
+```jsonc
+{
+  "enabled":   true,          // default true
+  "scale":     "medium",      // default "medium"  (one of SCALES in §12)
+  "screen":    "primary",     // default "primary" | "active" | "2" | "3" | …
+  "notchMode": "auto"         // default "auto"    | "normal" | "notch"
+}
+```
+
 ---
 
 ## 6. Key design decisions (don't undo these)
 
-### 6.1. Pin to `NSScreen.screens[0]` — the menu-bar screen
-`mainScreen` follows the focused window; it caused the capsule to jump
-displays when the user dragged focus. Geometry is re-probed via JXA on
-every companion spawn so arrangement changes are picked up live.
+### 6.1. Screen selection is a user preference (v0.2.0+)
+Default is `NSScreen.screens[0]` (menu-bar screen, `"primary"`) — the
+original stable anchor that avoided the "capsule jumps with focus" bug
+that `mainScreen` caused. But users on multi-monitor setups can opt in
+to `"active"` (screen under mouse at spawn, the PR #3 behaviour) or a
+specific monitor index (`"2"`, `"3"` …). The selector runs in JXA inside
+`companion.mjs::buildScreenSelectorJXA()`. Geometry is re-probed on
+every companion spawn; changing the `screen` pref sends a `respawn`
+message so the change is immediate.
 
 ### 6.2. Window level = `.statusBar` + `constrainFrameRect` override
 Two lines inside `island-host.swift` that make Dynamic-Island
@@ -249,35 +301,53 @@ Consecutive rows share a 1 px `rgba(255,255,255,0.08)` divider; only the
 last row rounds its bottom corners. No per-row drop-shadow (shadow
 bled into the screen edge as a visible black corner).
 
-### 6.5. Notch mode — auto on spawn, manual override via `/island2`
-`companion.mjs` sets `autoMode = notchH > 0 ? "notch" : "normal"` based
-on JXA `safeAreaInsets.top` and applies it when the WebView signals
-`ready`. `/island2` overrides to `"notch"` on demand (no reverse
-command exists — see §11).
+### 6.5. Notch mode — pref-driven with an `auto` default (v0.2.0+)
+`companion.mjs` reads `notchMode` from the pref file on spawn and
+decides:
+- `auto` (default) — `autoMode = notchH > 0 ? "notch" : "normal"`, the
+  original behaviour via JXA `safeAreaInsets.top`.
+- `normal` — force disabled regardless of detection.
+- `notch` — force enabled regardless of detection (replaces the old
+  `/island2` command).
+
+The live `{type:"mode"}` socket message still exists for same-session
+toggles, but settings-menu changes to `notchMode` round-trip through
+`respawn` so `autoMode` is recomputed with the new pref.
 
 ### 6.6. Demo matches production sizing
 `demo.mjs` routes through the **same** companion / WebView as real pi,
 so row size is intrinsically identical. Do not re-introduce a
 standalone demo HTML — it drifts.
 
-### 6.7. Sizing constants (all live in `companion.mjs` + `island.html.mjs`)
+### 6.7. Sizing constants
 
-| Constant              | Value       | Where / why                                                    |
-|-----------------------|-------------|----------------------------------------------------------------|
-| `WIN_W`               | 640 px      | `companion.mjs` — outer WebView window width (wider than the capsule itself so we have breathing room; the extra is transparent + clickThrough). |
-| `WIN_H`               | 420 px      | `companion.mjs` — window height, room for ~10 stacked rows. NSWindow can't be resized after spawn so we reserve. |
-| Window position       | `x = (screenW-WIN_W)/2, y = screenH-WIN_H` | Center horizontally; Cocoa origin is bottom-left, so `screenH-WIN_H` puts the TOP of the window at the TOP of the screen. |
-| Row width             | 460 px      | `island.html.mjs .row` — chosen by eye to match iPhone Dynamic Island proportions. |
-| Row height            | 34 px       | `island.html.mjs .row` — same. Animated via `max-height` for fade-in. |
-| Row grid (left/mid/right) | auto / 150 px max / auto | Flex layout with middle absolute-centered; 150 px middle keeps clear of left (~130 content) + right (~170 content). |
-| JXA fallback geometry | `1440×900, notch=0` | If the osascript probe fails (should never). |
-| JXA probe timeout     | 1500 ms     | `getScreenGeometry()` in `companion.mjs`. |
-| Idle-exit delay       | 6000 ms     | `scheduleIdleExit()` in `companion.mjs`. |
-| Done-row retract      | 5000 ms     | `hideTimer` in `index.ts` after `agent_end`. |
-| Error auto-revert     | 1500 ms     | `tool_execution_end` error branch in `index.ts`. |
-| Braille tick          | 80 ms       | `tickerB` in `island.html.mjs`. |
-| Elapsed tick          | 250 ms      | `tickerT` in `island.html.mjs`. |
-| Prompt truncation     | 48 chars    | `truncatePrompt()` in `index.ts`. |
+All numeric sizes in `island.html.mjs` that affect visual proportion are
+multiplied by `var(--scale)`, a CSS custom property driven by the user's
+`size` preset. Defaults below are at `medium` (`--scale: 1.0`).
+`setScale(name)` on `window.island` flips the global scale; demo mode
+can also set `--scale` inline on a single row via `rowScale` for the
+"all presets stacked" showcase.
+
+| Constant              | Value @ medium | Notes                                                       |
+|-----------------------|----------------|-------------------------------------------------------------|
+| `WIN_W`               | 640 px (fixed) | `companion.mjs`. Must fit the largest row (621 px at xlarge) plus clickThrough breathing room. |
+| `WIN_H`               | 420 px (fixed) | `companion.mjs`. NSWindow can't be resized after spawn so we reserve room for ~9-10 stacked rows at any scale. |
+| Window position       | `x = (screenW-WIN_W)/2, y = screenH-WIN_H` | Global coords; `y` places the TOP of the window at the TOP of the chosen screen. |
+| `SCALES` (JS)         | `{small:0.88, medium:1.0, large:1.18, xlarge:1.35}` | `island.html.mjs`. Must match the `SCALES` string list in `index.ts`. 1.35 is the ceiling at `WIN_W=640`. |
+| Row width             | `460 * scale`  | `.row` width — scales so left/middle/right proportions stay balanced. |
+| Row height            | `34 * scale`   | `.row` height; `max-height` enter animation uses the same calc. |
+| Left slot max-width   | `130 * scale`  | `.slot.left` clamps the project name via ellipsis so long basenames don't collide with the absolute-centered middle slot. |
+| Middle slot max-width | `150 * scale`  | `.slot.mid`, absolute-centered. |
+| Border radius (bottom corners of last row) | `22 * scale` | Capsule corner rounding. |
+| JXA fallback geometry | `1440×900, notch=0` | If the osascript probe fails (should never).       |
+| JXA probe timeout     | 1500 ms        | `getScreenGeometry()` in `companion.mjs`.                   |
+| Idle-exit delay       | 6000 ms        | `scheduleIdleExit()` in `companion.mjs`.                    |
+| Done-row retract      | 5000 ms        | `hideTimer` in `index.ts` after `agent_end`.                |
+| Error auto-revert     | 1500 ms        | `tool_execution_end` error branch in `index.ts`.            |
+| Braille tick          | 80 ms          | `tickerB` in `island.html.mjs`.                             |
+| Elapsed tick          | 250 ms         | `tickerT` in `island.html.mjs`. Timer shows integer seconds. |
+| Prompt truncation     | 48 chars       | `truncatePrompt()` in `index.ts`.                           |
+| Project truncation    | 20 chars       | `truncateProject()` in `index.ts` (source-side guard; CSS ellipsis adds a second safety net). |
 
 ---
 
@@ -337,21 +407,35 @@ back (e.g. click-to-dismiss).
 ## 8. What is done
 
 - ✅ Window pinned top-of-screen above menu bar (all Macs)
-- ✅ Notch wrap via `/island2` + auto-detect on spawn
-- ✅ Compact fixed size (no resize on state change)
+- ✅ Compact fixed-size window (no resize on state change)
 - ✅ Dot-loader + per-status colors (matches pi's own loader set)
-- ✅ Context % + elapsed timer (tabular-nums; space between `1m` and `47s`)
-- ✅ Multi-monitor: always targets menu-bar screen
+- ✅ Context % + elapsed timer (integer seconds, abbreviated in notch mode)
 - ✅ Multi-session stack (rows fuse into one capsule, shared dividers)
 - ✅ Demo mirrors real runtime dimensions
 - ✅ Middle slot is pixel-stable (absolute centered)
 - ✅ Auto idle-exit of companion 6 s after last client disconnects
 - ✅ GitHub Actions auto-publish on `v*` tag push
 - ✅ Default-on with persisted user preference (v0.1.1)
+- ✅ Settings menu via `ctx.ui.custom()` + pi-tui `SettingsList` (v0.2.0)
+- ✅ Size presets — `small`/`medium`/`large`/`xlarge` via `--scale` CSS var (v0.2.0)
+- ✅ Screen preference — `primary`/`active`/numeric index (v0.2.0)
+- ✅ Notch mode preference — `auto`/`normal`/`notch` (replaces `/island2`) (v0.2.0)
+- ✅ Project name overlap fix (issue #4) — source-side truncation + CSS ellipsis (v0.2.0)
+- ✅ Quick-action subcommands: `/island size|screen|notch|on|off|toggle` (v0.2.0)
+- ✅ Per-row `rowScale` demo hook for "all presets stacked" showcase (v0.2.0)
 
 ---
 
 ## 9. Release process
+
+> **Day-to-day dev/release workflow lives in [`docs/RELEASING.md`](docs/RELEASING.md).**
+> It documents the three loops (`dev:link` → `pack:test` → `release:*`)
+> and is the single source of truth once the project has been published.
+>
+> The subsections below (§9.1 – §9.7) describe the **one-off v0.1.0
+> initial publish setup** (`NPM_TOKEN`, GitHub Actions workflow, first
+> tarball). They are kept for historical reference. Don't follow them
+> for routine releases — use `docs/RELEASING.md`.
 
 Target: publishable open-source npm package installable via
 `pi install npm:pi-island`.
@@ -423,33 +507,43 @@ The workflow runs `npm publish --access public` on `macos-latest` with
 
 ## 10. Developer workflow
 
-Three ways to iterate, ranked by inner-loop speed:
+Three loops, ranked by inner-loop speed. Full walkthrough in
+[`docs/RELEASING.md`](docs/RELEASING.md).
 
 ### 10.1. Fastest — demo only
 ```bash
-node pi-extension/demo.mjs          # stacked demo
-node pi-extension/demo.mjs single   # single-row cycle
+node pi-extension/demo.mjs           # stacked demo (default)
+node pi-extension/demo.mjs single    # single-row walkthrough
+node pi-extension/demo.mjs overlap   # long project name + long prompt regression test
+node pi-extension/demo.mjs long      # 1000s task, ticks forever (Ctrl+C)
+node pi-extension/demo.mjs sizes     # all four size presets stacked
 ```
-No pi involved. Edit `island.html.mjs` / `companion.mjs` then re-run.
-If the companion was running, kill it first:
-```bash
-pkill -f pi-island/pi-extension/companion.mjs
-```
+No pi involved. Any of those accept an optional scale argument
+(`node pi-extension/demo.mjs single large`). Edit `island.html.mjs` /
+`companion.mjs`, `pkill -f pi-island/pi-extension/companion.mjs`, re-run.
 
-### 10.2. Medium — pi with local path install
+### 10.2. Medium — `npm link`ed pi (loop 1 in RELEASING.md)
 ```bash
-pi install /absolute/path/to/pi-island
+npm run dev:link     # global pi-island → symlinks to this repo
+npm run dev:status   # confirm LINKED vs NPM mode before a release
 ```
-Inside pi:
-- `/reload` picks up `index.ts` changes without restarting pi.
-- `/island` toggles the capsule.
-- Changes to Swift or the companion STILL require `pkill` + next run.
+`index.ts` edits go live via pi's `/reload`. Swift + companion changes
+still need `pkill` + next invocation so the daemon respawns.
 
-### 10.3. Slow — real npm install
+### 10.3. Pre-publish — real tarball (loop 2)
 ```bash
-pi install npm:pi-island
+npm run pack:test    # unlinks dev symlink, runs npm pack, installs tarball
 ```
-Only useful for smoke-testing the published tarball. Don't iterate here.
+Now `pi` runs the exact bits npm will ship. Test every menu row, scale,
+screen, notch mode, and the demo scripts here before publishing.
+
+### 10.4. Release (loop 3)
+```bash
+npm run release:patch   # bug fixes
+npm run release:minor   # new features (pre-1.0 may include breaking)
+npm run release:major   # breaking changes, post-1.0
+```
+Then `npm run dev:link` again to resume development.
 
 ---
 
@@ -531,6 +625,15 @@ caused confusing "why is the old binary running?" sessions.
   2. `renderRowContent` in `island.html.mjs`
   3. §5 of this file (socket contract)
 - Keep `AGENT.md` §6.7 (sizing table) in sync with any constant change.
+- When adding a **size preset**, update THREE places:
+  1. `SCALES` string array in `index.ts` (menu + subcommand validation).
+  2. `SCALES` number map in `island.html.mjs` (actual CSS scale).
+  3. §6.7 sizing table in this file.
+- When adding a **new preference field**, update FOUR places:
+  1. `Preference` type + `readPreference()` + `writePreference()` in `index.ts`.
+  2. `persistPref()` / helpers that call `writePreference`.
+  3. Settings menu row in `openSettingsMenu()` if user-configurable.
+  4. §5 pref schema in this file.
 - Turkish user comms are fine; code / commits / docs stay English.
 
 ---
@@ -549,31 +652,35 @@ caused confusing "why is the old binary running?" sessions.
 
 ## 14. Known limitations / quirks
 
-- **`/island2` has no toggle-back** — once you switch to notch mode,
-  there's no command to return to normal mode without killing the
-  companion. Fix: add `/island3` or make `/island2` toggle.
+- **Screen / notch change requires a respawn** — NSWindow geometry is
+  fixed at spawn. `doSetScreen` / `doSetNotchMode` send `{type:"respawn"}`
+  and the client's next `ensureConnection()` starts a fresh companion.
+  The ~300 ms gap is visible as a brief capsule disappearance.
 - **Single socket carries multiple session IDs** — when one pi process
   sends removes for id A then id B on the same socket, the companion's
   `sock.on("close")` only knows the *last* clientId. If the socket
   dies mid-stream, stale rows can remain until idle-exit fires. Low
   impact; fix by tracking all ids seen on a given socket.
 - **Resizing not supported** — `NSWindow` after spawn cannot change
-  size. If we ever need dynamic sizing, `island-host.swift` needs a
-  `{type:"resize"}` stdin handler.
-- **Peer dependency is `"*"`** — `@mariozechner/pi-coding-agent` pinned
-  to any version. If the extension API changes, install may succeed
-  but `index.ts` will crash on load. Pin when pi reaches 1.0.
+  size. Size preset changes flip a CSS var live (no respawn needed)
+  because `WIN_W`/`WIN_H` are reserved big enough for `xlarge`. A
+  future `xxlarge` would need a `{type:"resize"}` handler in
+  `island-host.swift` or a `WIN_W` bump.
+- **Peer dependencies are `"*"`** — `@mariozechner/pi-coding-agent`
+  and `@mariozechner/pi-tui` are both pinned to any version. If either
+  API changes, install may succeed but the extension crashes on load.
+  Pin when pi reaches 1.0.
 - **No uninstall cleanup hook** — `npm uninstall` / `pi uninstall`
-  leaves `~/.pi/pi-island.sock` if the companion was killed mid-run.
-  Harmless on next run (auto-unlinked).
+  leaves `~/.pi/pi-island.sock` and `~/.pi/pi-island.json` if the
+  companion was killed mid-run. Harmless on next run (sock auto-
+  unlinks, pref file is idempotent).
 
 ---
 
 ## 15. Future improvement backlog
 
-Not planned for v0.1.0 but worth tracking:
+Not planned yet but worth tracking:
 
-- `/island3` command to revert notch → normal at runtime.
 - Expand/collapse animation on hover (hover is currently blocked by
   `clickThrough: true`; would need mouse-tracking area).
 - Show the tool's actual target in `detail` for `bash` (current first

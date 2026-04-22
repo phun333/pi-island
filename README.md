@@ -17,18 +17,44 @@ Requires **macOS** + **pi** + Xcode Command Line Tools
 pi install npm:pi-island
 ```
 
-## Use
+The island turns on automatically for every pi session after install.
+Type `/island` any time to tweak it.
 
-Inside any pi session:
+## Settings
+
+Inside any pi session, type:
 
 ```
-/island     toggle the capsule on/off
-/island2    notch-wrap variant (for MacBooks with a notch)
+/island
+```
+
+A drop-down opens with four rows. Cycle each value with Enter or Space:
+
+| Setting       | Values                              | Notes                                          |
+|---------------|-------------------------------------|------------------------------------------------|
+| Visibility    | `enabled` / `disabled`              | Remember the choice across restarts.           |
+| Size          | `small` / `medium` / `large` / `xlarge` | Live — no respawn.                         |
+| Screen        | `primary` / `active` / `2` / `3` …  | `primary` = menu-bar display, `active` = under mouse, numbers for multi-monitor. |
+| Notch wrap    | `auto` / `normal` / `notch`         | `auto` detects. Forcing off/on also supported. |
+
+Your choices are persisted in `~/.pi/pi-island.json` and survive
+every pi restart.
+
+### Quick-actions (skip the menu)
+
+Muscle memory / scripts:
+
+```
+/island on            # or: enable
+/island off           # or: disable
+/island toggle
+/island size large
+/island screen primary
+/island notch notch
 ```
 
 Run pi in multiple terminals — each session gets its own row,
 stacked into one continuous capsule.
-
 
 ## Website
 

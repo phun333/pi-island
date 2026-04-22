@@ -72,9 +72,19 @@ This:
 Now `pi` is running the **future npm package**. Test the real flows:
 
 ```bash
-pi /island
-node pi-extension/demo.mjs
+pi /island                             # settings menu opens, 4 rows cycle cleanly
+pi /island size large                  # quick-action applies live
+node pi-extension/demo.mjs sizes       # all four presets stacked visually
+node pi-extension/demo.mjs long        # long-running task, timer ticks
 ```
+
+Also spot-check:
+
+- Every row in the menu cycles its values on Enter/Space.
+- Screen change respawns the companion and the capsule reappears on the
+  picked display.
+- Notch wrap `auto` / `normal` / `notch` respawns and re-detects.
+- Pref file `~/.pi/pi-island.json` now contains all four fields.
 
 If something is broken here that wasn't broken in loop 1, it's almost
 always one of:
@@ -83,6 +93,7 @@ always one of:
 - `scripts/postinstall.mjs` crashed on a clean install.
 - A path that worked because of the symlink is actually wrong in a
   normal install layout.
+- A new peer dependency is missing from `package.json`’s `peerDependencies`.
 
 Fix, commit, merge, re-run `npm run pack:test`.
 
@@ -94,9 +105,14 @@ When `pack:test` is green, release with one command:
 
 ```bash
 npm run release:patch      # 0.1.2 → 0.1.3   (bug fixes)
-npm run release:minor      # 0.1.2 → 0.2.0   (new features, backwards compatible)
-npm run release:major      # 0.1.2 → 1.0.0   (breaking changes)
+npm run release:minor      # 0.1.2 → 0.2.0   (new features — pre-1.0 may also include minor breaking changes)
+npm run release:major      # 0.1.2 → 1.0.0   (breaking changes post-1.0)
 ```
+
+Before 1.0 the project follows the looser pre-1.0 semver convention:
+breaking changes are allowed in minor bumps, but still call them out
+prominently in the release notes (`gh release create --notes`).
+Command/flag removals go under a "Breaking" heading.
 
 Each of these:
 

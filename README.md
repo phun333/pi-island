@@ -51,10 +51,29 @@ Muscle memory / scripts:
 /island size large
 /island screen primary
 /island notch notch
+/island reload        # reset companion state (emergency eject)
 ```
 
 Run pi in multiple terminals — each session gets its own row,
 stacked into one continuous capsule.
+
+## Troubleshooting
+
+### Empty / frozen rows stuck in the capsule
+
+If you see rows with no project name and a spinner that never
+advances (typically after upgrading pi-island while pi was running),
+reset the companion in one of two ways:
+
+1. Inside pi: `/island reload` — nukes state in place.
+2. Outside pi:
+   ```bash
+   pkill -f pi-island/pi-extension/companion.mjs
+   ```
+
+Either one is a one-shot cleanup. pi-island 0.2.1+ auto-detects and
+heals a version mismatch on the next `/island` use, so upgrading
+from 0.2.1 onward should be silent.
 
 ## Website
 

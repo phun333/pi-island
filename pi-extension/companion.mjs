@@ -15,6 +15,15 @@
 //   { "id": "<session-uuid>", "type": "mode",    "mode":  "normal"|"notch" }
 //   { "id": "<session-uuid>", "type": "scale",   "scale": "small"|"medium"|"large" }
 //   { "id": "<session-uuid>", "type": "respawn" }
+//   { "id": "<session-uuid>", "type": "hello",   "version": "0.2.1" }
+//
+// Server → client (only for version handshake, one JSON object per line):
+//   { "type": "hello-ack", "version": "0.2.1" }
+//
+// Unknown message types are IGNORED (not upserted). This is a deliberate
+// break from pre-0.2.1 companions which treated the default branch as an
+// upsert — older clients sending unknown types produced empty "ghost"
+// rows. Every concrete type is dispatched explicitly now.
 //
 // On startup the companion also reads ~/.pi/pi-island.json for settings it
 // owns (screen, notchMode). Clients bump those via the `respawn` message
@@ -30,10 +39,35 @@ import { createInterface } from "node:readline";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { openFixed } from "./open-fixed.mjs";
 import { buildIslandHTML } from "./island.html.mjs";
 import { SOCK } from "./socket-path.mjs";
+
+// ---- Version handshake ----------------------------------------------------
+// Used by the client so it can notice a version mismatch (e.g. user ran
+// `npm i pi-island` but we're still alive in-memory from the previous
+// version) and trigger a self-respawn. See `versionHandshake` / auto-heal
+// in pi-extension/index.ts.
+const HERE = dirname(fileURLToPath(import.meta.url));
+function readCompanionVersion() {
+  try {
+    const pkg = JSON.parse(readFileSync(join(HERE, "..", "package.json"), "utf8"));
+    return typeof pkg.version === "string" ? pkg.version : "0.0.0";
+  } catch { return "0.0.0"; }
+}
+const COMPANION_VERSION = readCompanionVersion();
+
+// ---- Status vocabulary ----------------------------------------------------
+// Must stay in sync with the STATUS table in island.html.mjs and the
+// toolToIsland map in index.ts. Updates with any other value are dropped
+// at the companion boundary so malformed / version-mismatched clients
+// can't leak empty "ghost" rows into the WebView. See AGENT.md §5.
+const VALID_STATUS = new Set([
+  "thinking", "reading", "editing", "writing",
+  "running",  "searching", "done",    "error",
+]);
 
 // ---- User preference --------------------------------------------------
 // Small subset of ~/.pi/pi-island.json that this process cares about.
@@ -184,6 +218,11 @@ if (existsSync(SOCK)) {
 }
 
 const clients = new Set();
+// Per-socket id tracker — every distinct `id` we've ever seen on this
+// socket. On disconnect we issue `removeRow` for ALL of them, not just
+// the last one. Fixes the "Single socket carries multiple session IDs"
+// limitation documented in the pre-0.2.1 AGENT.md §14.
+const socketIds = new WeakMap();
 let idleTimer = null;
 
 function scheduleIdleExit() {
@@ -198,25 +237,58 @@ function scheduleIdleExit() {
 
 const server = createServer((sock) => {
   clients.add(sock);
+  socketIds.set(sock, new Set());
   if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
 
-  let clientId = null;
   const rl = createInterface({ input: sock, crlfDelay: Infinity });
 
   rl.on("line", (line) => {
     let msg;
     try { msg = JSON.parse(line); } catch { return; }
-    if (!msg || !msg.id) return;
-    clientId = msg.id;
+    if (!msg || typeof msg.type !== "string") return;
+    // Track every distinct id seen on this socket for cleanup on close.
+    if (typeof msg.id === "string" && msg.id) {
+      socketIds.get(sock)?.add(msg.id);
+    }
+
+    // ── Explicit dispatch — no default-upsert ─────────────────────────────
+    // Pre-0.2.1 companions treated anything with an id as an upsert. That
+    // turned protocol-mismatched messages (e.g. a new client sending
+    // `type:"scale"` to an old companion) into empty ghost rows. We now
+    // dispatch by exact type and silently ignore anything we don't know.
+
+    if (msg.type === "hello") {
+      // Version handshake — client uses this to detect a version mismatch
+      // and trigger a self-respawn. We just reply with our own version;
+      // the client decides whether to respawn us.
+      try {
+        sock.write(JSON.stringify({
+          type: "hello-ack",
+          version: COMPANION_VERSION,
+        }) + "\n");
+      } catch {}
+      return;
+    }
+
+    if (msg.type === "update") {
+      // Require a valid status — empty / unknown statuses are dropped at
+      // the boundary so malformed clients can't create ghost rows.
+      if (!msg.id || !VALID_STATUS.has(msg.status)) return;
+      send(`window.island.upsertRow(${JSON.stringify(msg.id)},${JSON.stringify(msg)})`);
+      return;
+    }
 
     if (msg.type === "remove") {
+      if (!msg.id) return;
       send(`window.island.removeRow(${JSON.stringify(msg.id)})`);
       return;
     }
+
     if (msg.type === "mode" && (msg.mode === "normal" || msg.mode === "notch")) {
       send(`window.island.setMode(${JSON.stringify(msg.mode)})`);
       return;
     }
+
     if (msg.type === "scale" && typeof msg.scale === "string") {
       // WebView clamps unknown scales to medium — we don't need to validate
       // here, just forward. This keeps the companion agnostic to the preset
@@ -225,20 +297,26 @@ const server = createServer((sock) => {
       send(`window.island.setScale(${JSON.stringify(msg.scale)})`);
       return;
     }
+
     if (msg.type === "respawn") {
       // Graceful shutdown so the client's next ensureConnection() spawns
-      // a fresh companion that re-reads the pref file (new screen / notch).
+      // a fresh companion that re-reads the pref file (new screen / notch)
+      // or runs the newly-installed code (auto-heal after `npm update`).
       cleanup();
       process.exit(0);
       return;
     }
-    // Default: treat as an upsert.
-    send(`window.island.upsertRow(${JSON.stringify(msg.id)},${JSON.stringify(msg)})`);
+
+    // Unknown type — ignore. No row created.
   });
 
   sock.on("close", () => {
     clients.delete(sock);
-    if (clientId) send(`window.island.removeRow(${JSON.stringify(clientId)})`);
+    const ids = socketIds.get(sock);
+    if (ids) {
+      for (const id of ids) send(`window.island.removeRow(${JSON.stringify(id)})`);
+      socketIds.delete(sock);
+    }
     if (clients.size === 0) scheduleIdleExit();
   });
   sock.on("error", () => {});

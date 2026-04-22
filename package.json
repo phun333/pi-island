@@ -1,6 +1,6 @@
 {
   "name": "pi-island",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "macOS Dynamic-Island-style status capsule for the pi coding agent. Shows what pi is doing in real time, at the very top of your screen — with native notch-wrap support for MacBooks.",
   "type": "module",
   "keywords": [

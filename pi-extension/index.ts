@@ -20,13 +20,25 @@ import { spawn, execSync } from "node:child_process";
 import { basename, join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { SOCK } from "./socket-path.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const COMPANION = join(HERE, "companion.mjs");
 const SESSION_ID = randomUUID().slice(0, 8);
+
+// Version the extension is running at — shipped to the companion in the
+// `hello` handshake. If the companion reports a different version we
+// assume state may be corrupt (pre-0.2.1 ghost-row bug, protocol drift)
+// and auto-heal by respawning it. See `versionHandshake()` below.
+function readExtensionVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(HERE, "..", "package.json"), "utf8"));
+    return typeof pkg.version === "string" ? pkg.version : "0.0.0";
+  } catch { return "0.0.0"; }
+}
+const EXTENSION_VERSION = readExtensionVersion();
 
 // ── Persistent user preference ─────────────────────────────────────────────
 // Every user-visible setting that survives restarts lives in ~/.pi/pi-island.json.
@@ -69,10 +81,14 @@ type NotchMode = typeof NOTCH_MODES[number];
 const DEFAULT_NOTCH: NotchMode = "auto";
 
 type Preference = {
-  enabled:   boolean;
-  scale:     Scale;
-  screen:    ScreenPref;
-  notchMode: NotchMode;
+  enabled:     boolean;
+  scale:       Scale;
+  screen:      ScreenPref;
+  notchMode:   NotchMode;
+  // Version of pi-island that last wrote this file. Used to fire a
+  // one-time welcome notify after `npm update` so the user knows the
+  // upgrade happened (and that state was auto-healed if needed).
+  lastVersion?: string;
 };
 
 function isScale(v: unknown): v is Scale {
@@ -100,10 +116,11 @@ function readPreference(): Preference {
     if (!existsSync(PREF_FILE)) return fallback;
     const data = JSON.parse(readFileSync(PREF_FILE, "utf8"));
     return {
-      enabled:   data?.enabled   !== false,
-      scale:     isScale(data?.scale)          ? data.scale     : DEFAULT_SCALE,
-      screen:    isScreen(data?.screen)        ? data.screen    : DEFAULT_SCREEN,
-      notchMode: isNotchMode(data?.notchMode)  ? data.notchMode : DEFAULT_NOTCH,
+      enabled:     data?.enabled   !== false,
+      scale:       isScale(data?.scale)          ? data.scale     : DEFAULT_SCALE,
+      screen:      isScreen(data?.screen)        ? data.screen    : DEFAULT_SCREEN,
+      notchMode:   isNotchMode(data?.notchMode)  ? data.notchMode : DEFAULT_NOTCH,
+      lastVersion: typeof data?.lastVersion === "string" ? data.lastVersion : undefined,
     };
   } catch {
     return fallback;
@@ -195,10 +212,11 @@ export default function (pi: ExtensionAPI) {
 
   function persistPref() {
     writePreference({
-      enabled:   shownForSession,
-      scale:     currentScale,
-      screen:    currentScreen,
-      notchMode: currentNotchMode,
+      enabled:     shownForSession,
+      scale:       currentScale,
+      screen:      currentScreen,
+      notchMode:   currentNotchMode,
+      lastVersion: EXTENSION_VERSION,
     });
   }
 
@@ -218,6 +236,83 @@ export default function (pi: ExtensionAPI) {
     });
   }
 
+  // Auto-heal: ask the companion "what version are you?" and if it
+  // disagrees with us (or doesn't answer — pre-0.2.1 companions have no
+  // `hello` handler) treat it as stale and force a respawn. This is what
+  // lets a user `npm update` and see ghost rows disappear without ever
+  // running `/island reload` or `pkill` manually.
+  //
+  // Returns true if the current companion is compatible (same version);
+  // false if the caller should forceRespawn() and reconnect.
+  function versionHandshake(): Promise<boolean> {
+    const s = sock;
+    if (!s || s.destroyed) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let buf = "";
+      let done = false;
+      const finish = (ok: boolean) => {
+        if (done) return;
+        done = true;
+        s.off("data", onData);
+        resolve(ok);
+      };
+      const onData = (chunk: Buffer) => {
+        buf += chunk.toString("utf8");
+        let nl = buf.indexOf("\n");
+        while (nl >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          try {
+            const msg = JSON.parse(line);
+            if (msg && msg.type === "hello-ack") {
+              finish(typeof msg.version === "string" && msg.version === EXTENSION_VERSION);
+              return;
+            }
+          } catch { /* not our line, ignore */ }
+          nl = buf.indexOf("\n");
+        }
+      };
+      s.on("data", onData);
+      try {
+        s.write(JSON.stringify({
+          id: SESSION_ID,
+          type: "hello",
+          version: EXTENSION_VERSION,
+        }) + "\n");
+      } catch {
+        finish(false);
+        return;
+      }
+      // Generous timeout — pre-0.2.1 companions never reply, and we want
+      // to respawn them. A legit companion responds in <10ms on localhost.
+      setTimeout(() => finish(false), 1000);
+    });
+  }
+
+  // Force the companion to exit regardless of protocol support. Polite
+  // first (respawn message for v0.2.1+ companions), then a hard pkill
+  // so pre-0.2.1 companions — which don't understand `respawn` — die
+  // too. Also cleans up the socket file in case the old process crashed
+  // without removing it. Safe to call even when no companion is running.
+  async function forceRespawn(): Promise<void> {
+    if (sock && !sock.destroyed) {
+      // Clean up any ghost row the old companion may have created from our
+      // `hello` message (pre-0.2.1 treated unknown types as upserts).
+      try { writeMessage({ id: SESSION_ID, type: "remove" }); } catch {}
+      try { writeMessage({ id: SESSION_ID, type: "respawn" }); } catch {}
+      try { sock.end(); } catch {}
+      sock = null;
+    }
+    try {
+      execSync("pkill -f pi-island/pi-extension/companion.mjs", {
+        timeout: 1000,
+        stdio: "ignore",
+      });
+    } catch { /* no matching process */ }
+    try { if (existsSync(SOCK)) unlinkSync(SOCK); } catch {}
+    await new Promise((r) => setTimeout(r, 300));
+  }
+
   // Tell the companion the client's current visual scale. Pushed on every
   // fresh connect so a freshly-spawned companion (medium by default) picks
   // up the user's pref without waiting for an explicit size change.
@@ -231,7 +326,18 @@ export default function (pi: ExtensionAPI) {
     connecting = true;
     try {
       // Try connecting to an existing companion first.
-      if (existsSync(SOCK) && await connectToCompanion()) { syncScale(); return true; }
+      if (existsSync(SOCK) && await connectToCompanion()) {
+        // Auto-heal: verify the running companion matches our version.
+        // If it doesn't (or doesn't respond to hello — pre-0.2.1), kill
+        // it and spawn a fresh one. This is the "user ran npm update but
+        // ghost rows stick around" fix.
+        if (await versionHandshake()) {
+          syncScale();
+          return true;
+        }
+        await forceRespawn();
+        // Fall through to the spawn path below.
+      }
 
       // Otherwise spawn the companion and poll until the socket is up.
       if (!existsSync(COMPANION)) return false;
@@ -243,7 +349,18 @@ export default function (pi: ExtensionAPI) {
 
       for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 100));
-        if (await connectToCompanion()) { syncScale(); return true; }
+        if (await connectToCompanion()) {
+          // We spawned this companion ourselves, so versions match by
+          // construction — but still do the handshake as a sanity check
+          // (catches the "wrong binary on PATH" failure mode).
+          if (await versionHandshake()) {
+            syncScale();
+            return true;
+          }
+          // If even a freshly-spawned companion disagrees, give up
+          // rather than looping. Something is badly wrong.
+          return false;
+        }
       }
       return false;
     } finally {
@@ -297,6 +414,33 @@ export default function (pi: ExtensionAPI) {
       await new Promise((r) => setTimeout(r, 300));
     }
     if (shownForSession) await ensureConnection();
+  }
+
+  // User-facing reset — nukes the companion (and with it any ghost rows)
+  // and lets the next event spawn a clean one. Exposed via `/island reload`.
+  // Uses forceRespawn() because the caller likely reached for this exactly
+  // when polite `respawn` isn't enough (stale state, pre-0.2.1 companion).
+  async function reloadCompanion(ctx: any) {
+    await forceRespawn();
+    if (shownForSession) await ensureConnection();
+    ctx.ui.notify("Island reloaded — state reset", "info");
+  }
+
+  // One-time welcome notice after `npm update`. Fires on the first
+  // session of a newly-installed version and updates `lastVersion` in
+  // the pref file so it doesn't nag on subsequent sessions.
+  function maybeShowUpgradeNotice(ctx: any) {
+    if (pref.lastVersion === EXTENSION_VERSION) return;
+    // First session ever (no lastVersion) — don't nag new users.
+    const isFirstEver = !pref.lastVersion;
+    persistPref();  // writes lastVersion = EXTENSION_VERSION
+    if (isFirstEver) return;
+    try {
+      ctx.ui.notify(
+        `pi-island updated to ${EXTENSION_VERSION}. Try /island for settings.`,
+        "info",
+      );
+    } catch { /* best-effort — don't crash a session over a toast */ }
   }
 
   // ── Setting actions (shared between /island subcommands and the menu) ────
@@ -453,6 +597,7 @@ export default function (pi: ExtensionAPI) {
     lastCtx = ctx;
     // Don't auto-show on session start — the island appears on the first
     // agent_start event (when there's actually something to show).
+    maybeShowUpgradeNotice(ctx);
   });
 
   pi.on("session_shutdown", async () => {
@@ -542,6 +687,10 @@ export default function (pi: ExtensionAPI) {
         if (shownForSession) await doDisable(ctx); else await doEnable(ctx);
         return;
       }
+      if (sub === "reload" || sub === "reset") {
+        await reloadCompanion(ctx);
+        return;
+      }
 
       if (sub === "size") {
         const next = parts[1]?.toLowerCase();
@@ -598,7 +747,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       ctx.ui.notify(
-        `Unknown subcommand "${sub}". Try: /island (menu)  or  /island size|screen|notch <value>`,
+        `Unknown subcommand "${sub}". Try: /island (menu)  or  /island size|screen|notch|reload <value>`,
         "error",
       );
     },

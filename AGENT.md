@@ -153,7 +153,7 @@ README color table.
   — in the notched first row the readout stays at 3–4 chars (`16m`,
   `1h`, `12h`) so the growing timer never slides behind the notch.
 
-### 4.5. The `/island` command (v0.2.0+)
+### 4.5. The `/island` command (v0.2.0+, `reload` added in v0.2.1)
 
 `/island` is the single entry point — no more `/island2`. With no args it
 opens a settings menu rendered via `ctx.ui.custom()` + pi-tui's
@@ -180,7 +180,12 @@ Missing fields fall back to defaults, so a v0.1.x pref file (just
 /island size   <small|medium|large|xlarge>
 /island screen <primary|active|2|3|...>
 /island notch  <auto|normal|notch>
+/island reload | reset                      # v0.2.1: force companion respawn
 ```
+
+The `reload` subcommand calls `forceRespawn()` which pkills any
+pre-0.2.1 companion that doesn't understand the `respawn` message.
+Also exposed as `reset` for discoverability.
 
 **Removed in v0.2.0:** `/island2`. Its behaviour (force notch wrap)
 moved into the menu's `Notch wrap` row — and unlike the old command,
@@ -229,10 +234,31 @@ One JSON object per line. Writer: `writeMessage` in `index.ts`. Reader:
 // fresh instance that re-reads ~/.pi/pi-island.json (used for screen and
 // notchMode changes where NSWindow geometry is fixed at spawn).
 { "id": "...", "type": "respawn" }
+
+// Version handshake (v0.2.1+). Client sends this on every fresh connect;
+// companion replies with `hello-ack`. A mismatch (or timeout — pre-0.2.1
+// companions don't respond) triggers the client to forceRespawn the
+// companion. See §6.8 (auto-heal).
+{ "id": "...", "type": "hello", "version": "0.2.1" }
 ```
 
+**Server → client** messages (v0.2.1+, only in response to `hello`):
+```jsonc
+{ "type": "hello-ack", "version": "0.2.1" }
+```
+
+**Explicit dispatch — no default-upsert (v0.2.1+).** Pre-0.2.1 companions
+treated any unknown message type as an upsert, which produced empty
+"ghost" rows when a newer client sent a message an older companion
+didn't know. Every message type is now dispatched by exact match;
+unknown types are silently dropped. Consequence: **adding a new message
+type requires an explicit handler in `companion.mjs` — it won't just
+"work" via the default branch any more.**
+
 **Required vs optional:**
-- Required on `update`: `id`, `type`, `status`.
+- Required on `update`: `id`, `type`, and a `status` from the vocabulary
+  below. Updates without a valid `status` are dropped at the companion
+  (another ghost-row safety net).
 - Everything else is optional. Companion passes the JSON straight
   through; the WebView's `upsertRow` merges with previous state, so a
   partial update (`{id, type, status, detail}`) keeps the earlier
@@ -254,10 +280,12 @@ changed without a fresh window). All fields are optional; missing
 values fall back to defaults.
 ```jsonc
 {
-  "enabled":   true,          // default true
-  "scale":     "medium",      // default "medium"  (one of SCALES in §12)
-  "screen":    "primary",     // default "primary" | "active" | "2" | "3" | …
-  "notchMode": "auto"         // default "auto"    | "normal" | "notch"
+  "enabled":     true,        // default true
+  "scale":       "medium",    // default "medium"  (one of SCALES in §12)
+  "screen":      "primary",   // default "primary" | "active" | "2" | "3" | …
+  "notchMode":   "auto",      // default "auto"    | "normal" | "notch"
+  "lastVersion": "0.2.1"      // (v0.2.1+) pi-island version that last ran;
+                              // drives the one-time upgrade notify
 }
 ```
 
@@ -301,7 +329,36 @@ Consecutive rows share a 1 px `rgba(255,255,255,0.08)` divider; only the
 last row rounds its bottom corners. No per-row drop-shadow (shadow
 bled into the screen edge as a visible black corner).
 
-### 6.5. Notch mode — pref-driven with an `auto` default (v0.2.0+)
+### 6.5. Auto-heal via version handshake (v0.2.1+)
+On every fresh socket connect the extension sends
+`{type:"hello", version:"<current>"}`. The companion replies with
+`{type:"hello-ack", version:"<its>"}`. Outcomes:
+
+| Response | Interpretation | Action |
+|----------|----------------|--------|
+| Versions equal | compatible companion | proceed |
+| Versions differ | stale companion after `npm update` | forceRespawn |
+| No response within 1 s | pre-0.2.1 companion (no handler) | forceRespawn |
+
+`forceRespawn()` is deliberately belt-and-braces:
+1. Send a polite `remove` + `respawn` (pre-0.2.1 companions don't
+   understand these, but sending them is harmless — they get dropped
+   now that default-upsert is gone).
+2. `pkill -f pi-island/pi-extension/companion.mjs` for pre-0.2.1
+   companions that won't exit on their own.
+3. `unlinkSync(SOCK)` in case the old process died without cleanup.
+4. Wait 300 ms, reconnect — which spawns a fresh companion.
+
+This is the invisible fix for the "user ran `npm i pi-island` and now
+sees empty rows" bug (see §14 known-limitations history). Prior to
+0.2.1 the only fix was `/island reload` (manual) or restarting the
+terminal.
+
+**Do not remove the handshake** without replacing it with another
+way to detect state mismatch — the pre-0.2.1 ghost-row bug is not
+hypothetical, it shipped to users.
+
+### 6.6. Notch mode — pref-driven with an `auto` default (v0.2.0+)
 `companion.mjs` reads `notchMode` from the pref file on spawn and
 decides:
 - `auto` (default) — `autoMode = notchH > 0 ? "notch" : "normal"`, the
@@ -314,12 +371,12 @@ The live `{type:"mode"}` socket message still exists for same-session
 toggles, but settings-menu changes to `notchMode` round-trip through
 `respawn` so `autoMode` is recomputed with the new pref.
 
-### 6.6. Demo matches production sizing
+### 6.7. Demo matches production sizing
 `demo.mjs` routes through the **same** companion / WebView as real pi,
 so row size is intrinsically identical. Do not re-introduce a
 standalone demo HTML — it drifts.
 
-### 6.7. Sizing constants
+### 6.8. Sizing constants
 
 All numeric sizes in `island.html.mjs` that affect visual proportion are
 multiplied by `var(--scale)`, a CSS custom property driven by the user's
@@ -423,6 +480,10 @@ back (e.g. click-to-dismiss).
 - ✅ Project name overlap fix (issue #4) — source-side truncation + CSS ellipsis (v0.2.0)
 - ✅ Quick-action subcommands: `/island size|screen|notch|on|off|toggle` (v0.2.0)
 - ✅ Per-row `rowScale` demo hook for "all presets stacked" showcase (v0.2.0)
+- ✅ Ghost-row fix: explicit dispatch + per-socket id tracking + status whitelist (v0.2.1)
+- ✅ Auto-heal via version handshake — silent recovery after `npm update` (v0.2.1)
+- ✅ `/island reload` subcommand for manual state reset (v0.2.1)
+- ✅ One-time welcome notify on version change (v0.2.1)
 
 ---
 
@@ -624,7 +685,16 @@ caused confusing "why is the old binary running?" sessions.
   1. Message construction in `index.ts` (`sendUpdate`)
   2. `renderRowContent` in `island.html.mjs`
   3. §5 of this file (socket contract)
-- Keep `AGENT.md` §6.7 (sizing table) in sync with any constant change.
+- Keep `AGENT.md` §6.8 (sizing table) in sync with any constant change.
+- When adding a **new socket message type**, update FOUR places:
+  1. Explicit dispatch in `companion.mjs` `rl.on("line")`. The default
+     branch is "ignore" now — a missing handler means your message is
+     silently dropped.
+  2. Protocol doc in §5 of this file.
+  3. Client-side writer in `index.ts` (usually a new `writeMessage`
+     call or helper).
+  4. If the new type is supposed to survive companion mismatch, bump
+     the handshake expectation so older companions trigger auto-heal.
 - When adding a **size preset**, update THREE places:
   1. `SCALES` string array in `index.ts` (menu + subcommand validation).
   2. `SCALES` number map in `island.html.mjs` (actual CSS scale).
@@ -656,11 +726,12 @@ caused confusing "why is the old binary running?" sessions.
   fixed at spawn. `doSetScreen` / `doSetNotchMode` send `{type:"respawn"}`
   and the client's next `ensureConnection()` starts a fresh companion.
   The ~300 ms gap is visible as a brief capsule disappearance.
-- **Single socket carries multiple session IDs** — when one pi process
-  sends removes for id A then id B on the same socket, the companion's
-  `sock.on("close")` only knows the *last* clientId. If the socket
-  dies mid-stream, stale rows can remain until idle-exit fires. Low
-  impact; fix by tracking all ids seen on a given socket.
+- ~~**Single socket carries multiple session IDs**~~ **RESOLVED in
+  v0.2.1.** The companion now tracks every distinct id seen on a given
+  socket (`socketIds: WeakMap<Socket, Set<string>>`) and removes all
+  of them on `sock.on("close")`. Previously only the last id was
+  cleaned up, which could leak ghost rows when a client multiplexed
+  sessions or crashed mid-stream.
 - **Resizing not supported** — `NSWindow` after spawn cannot change
   size. Size preset changes flip a CSS var live (no respawn needed)
   because `WIN_W`/`WIN_H` are reserved big enough for `xlarge`. A

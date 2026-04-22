@@ -12,7 +12,14 @@
 //     "project": "...", "status": "thinking", "detail": "...",
 //     "prompt": "...", "ctxPct": 34, "frozenElapsed": <ms>|null }
 //   { "id": "<session-uuid>", "type": "remove" }
-//   { "id": "<session-uuid>", "type": "mode", "mode": "normal"|"notch" }
+//   { "id": "<session-uuid>", "type": "mode",    "mode":  "normal"|"notch" }
+//   { "id": "<session-uuid>", "type": "scale",   "scale": "small"|"medium"|"large" }
+//   { "id": "<session-uuid>", "type": "respawn" }
+//
+// On startup the companion also reads ~/.pi/pi-island.json for settings it
+// owns (screen, notchMode). Clients bump those via the `respawn` message
+// after updating the pref file — NSWindow geometry is fixed at spawn so a
+// live screen change requires a fresh process.
 //
 // When the last client disconnects we keep the window for 6s so a quick
 // reconnect (pi /new, /reload, etc.) doesn't flash the capsule closed,
@@ -20,29 +27,44 @@
 
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { openFixed } from "./open-fixed.mjs";
 import { buildIslandHTML } from "./island.html.mjs";
 import { SOCK } from "./socket-path.mjs";
 
-// ---- Screen geometry ------------------------------------------------------
-// Find the screen to host the island on. Strategy:
-//   1. Screen under the mouse cursor (what the user is looking at right now).
-//   2. NSScreen.mainScreen  (menu-bar / focused screen).
-//   3. NSScreen.screens[0]  (last-resort, documented as arbitrary order).
-//
-// We return the screen's *global* origin in addition to its size, so the
-// caller can place the window in the global coordinate space instead of
-// accidentally using screen-local coords as global ones (which lands the
-// window in a random spot on multi-monitor setups).
-function getScreenGeometry() {
+// ---- User preference --------------------------------------------------
+// Small subset of ~/.pi/pi-island.json that this process cares about.
+// The client-side extension owns the full schema; we only read the two
+// fields that drive geometry (screen + notchMode) and silently ignore
+// the rest so old/new formats coexist.
+const PREF_FILE = join(homedir(), ".pi", "pi-island.json");
+
+function readPref() {
   try {
-    const script =
-      "ObjC.import('AppKit');" +
+    if (!existsSync(PREF_FILE)) return {};
+    const data = JSON.parse(readFileSync(PREF_FILE, "utf8"));
+    return data && typeof data === "object" ? data : {};
+  } catch { return {}; }
+}
+
+// ---- Screen geometry ------------------------------------------------------
+// Pick the target NSScreen based on the user preference:
+//
+//   "primary"  → NSScreen.screens[0]  (menu-bar screen, AGENT.md §6.1 original)
+//   "active"   → screen under the mouse cursor at spawn (multi-monitor follow)
+//   "N" (1..)  → specific display index (1 == screens[0] == primary)
+//
+// Any unknown / missing value falls back to primary. We still return the
+// screen's *global* origin so the caller can place the window in global
+// coordinate space (Cocoa uses bottom-left) on multi-monitor setups.
+function buildScreenSelectorJXA(screenPref) {
+  if (screenPref === "active") {
+    return (
       "const mouse = $.NSEvent.mouseLocation;" +
       "const all = $.NSScreen.screens.js;" +
-      "let s = null;" +
       "for (const scr of all) {" +
       "  const f = scr.frame;" +
       "  if (mouse.x >= f.origin.x && mouse.x < f.origin.x + f.size.width &&" +
@@ -50,8 +72,29 @@ function getScreenGeometry() {
       "    s = scr; break;" +
       "  }" +
       "}" +
-      "if (!s) s = $.NSScreen.mainScreen;" +
-      "if (!s || !s.frame) s = all[0];" +
+      "if (!s) s = $.NSScreen.mainScreen;"
+    );
+  }
+  const idx = parseInt(screenPref, 10);
+  if (Number.isFinite(idx) && idx >= 1) {
+    // Clamp to available screens inside the JXA runtime so out-of-range
+    // indices don't explode — fall back to screens[0].
+    return (
+      "const all = $.NSScreen.screens.js;" +
+      `s = all[${idx - 1}] || all[0];`
+    );
+  }
+  // "primary" or anything unknown.
+  return "s = $.NSScreen.screens.js[0];";
+}
+
+function getScreenGeometry(screenPref) {
+  try {
+    const script =
+      "ObjC.import('AppKit');" +
+      "let s = null;" +
+      buildScreenSelectorJXA(screenPref) +
+      "if (!s || !s.frame) s = $.NSScreen.screens.js[0];" +
       "const f = s.frame;" +
       "const sa = (s.safeAreaInsets && s.safeAreaInsets.top) || 0;" +
       "JSON.stringify({x: f.origin.x, y: f.origin.y, w: f.size.width, h: f.size.height, notch: sa})";
@@ -80,20 +123,39 @@ function getScreenGeometry() {
 const WIN_W = 640;
 const WIN_H = 420; // room for ~10 rows comfortably
 
+// Pull settings from the pref file (client may have written them before
+// spawning us). Missing / bogus values fall back to safe defaults.
+const _pref = readPref();
+const SCREEN_PREF =
+  typeof _pref.screen === "string" && _pref.screen.length > 0
+    ? _pref.screen
+    : "primary";
+const NOTCH_PREF =
+  _pref.notchMode === "normal" || _pref.notchMode === "notch"
+    ? _pref.notchMode
+    : "auto";
+
 const {
   x: screenX,
   y: screenY,
   width:  screenW,
   height: screenH,
   notch:  notchH,
-} = getScreenGeometry();
+} = getScreenGeometry(SCREEN_PREF);
 
-// Place the window top-center of the *active* screen, in the global
+// Place the window top-center of the chosen screen, in the global
 // coordinate space (macOS uses bottom-left origin; larger y = further up).
 const x = Math.round(screenX + (screenW - WIN_W) / 2);
 const y = Math.round(screenY + screenH - WIN_H);
 
-const autoMode = notchH > 0 ? "notch" : "normal";
+// Resolve the notch policy:
+//   "normal"  → force off regardless of detection
+//   "notch"   → force on regardless of detection
+//   anything else ("auto") → use the detected value
+const autoMode =
+  NOTCH_PREF === "normal" ? "normal" :
+  NOTCH_PREF === "notch"  ? "notch"  :
+  (notchH > 0 ? "notch" : "normal");
 
 const win = openFixed(buildIslandHTML(), {
   width: WIN_W, height: WIN_H, x, y,
@@ -153,6 +215,21 @@ const server = createServer((sock) => {
     }
     if (msg.type === "mode" && (msg.mode === "normal" || msg.mode === "notch")) {
       send(`window.island.setMode(${JSON.stringify(msg.mode)})`);
+      return;
+    }
+    if (msg.type === "scale" && typeof msg.scale === "string") {
+      // WebView clamps unknown scales to medium — we don't need to validate
+      // here, just forward. This keeps the companion agnostic to the preset
+      // list so new sizes can land in index.ts + island.html.mjs without a
+      // companion change.
+      send(`window.island.setScale(${JSON.stringify(msg.scale)})`);
+      return;
+    }
+    if (msg.type === "respawn") {
+      // Graceful shutdown so the client's next ensureConnection() spawns
+      // a fresh companion that re-reads the pref file (new screen / notch).
+      cleanup();
+      process.exit(0);
       return;
     }
     // Default: treat as an upsert.

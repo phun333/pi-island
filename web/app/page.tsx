@@ -93,27 +93,50 @@ export default function Home() {
           </div>
         </section>
 
-        {/* ======================= COMMANDS ======================= */}
-        <section id="commands" className="mt-16 scroll-mt-16">
+        {/* ======================= SETTINGS ======================= */}
+        <section id="settings" className="mt-16 scroll-mt-16">
           <div className="flex items-end justify-between gap-4 border-b border-[color:var(--border)] pb-2 mb-5">
-            <h2 className="font-sans font-semibold text-[17px] tracking-tight">Commands</h2>
+            <h2 className="font-sans font-semibold text-[17px] tracking-tight">Settings</h2>
             <span className="text-[10px] text-[color:var(--foreground-dim)] uppercase tracking-wider">
               inside any pi session
             </span>
           </div>
 
+          <p className="text-[14px] text-[color:var(--foreground-dim)] leading-relaxed mb-5">
+            Type <code className="font-mono text-[12.5px] text-[color:var(--foreground)] bg-[color:var(--background-muted)] px-1.5 py-0.5 rounded border border-[color:var(--border)]">/island</code>{" "}
+            to open the settings panel. Cycle any row with Enter or Space.
+            Choices persist in{" "}
+            <code className="font-mono text-[12px] text-[color:var(--foreground-dim)]">~/.pi/pi-island.json</code>.
+          </p>
+
           <div className="grid sm:grid-cols-2 gap-3">
             <CommandCard
-              name="/island"
-              desc="Toggle the capsule on/off. Default floating position, anchored to the top of your screen."
+              name="Visibility"
+              desc="enabled / disabled — show or hide the capsule. Remembers your choice."
             />
             <CommandCard
-              name="/island2"
-              desc="Notch-wrap variant. Splits around the MacBook notch so the capsule hugs it natively."
+              name="Size"
+              desc="small / medium / large / xlarge — row height and font scale together. Live, no restart."
+            />
+            <CommandCard
+              name="Screen"
+              desc="primary / active / 2 / 3 — pick a monitor. primary = menu-bar display, active = follow mouse."
+            />
+            <CommandCard
+              name="Notch wrap"
+              desc="auto / normal / notch — wrap the MacBook notch automatically, or force it on/off."
             />
           </div>
 
           <p className="mt-5 text-[13px] text-[color:var(--foreground-dim)] leading-relaxed">
+            Skip the menu for muscle memory:{" "}
+            <code className="font-mono text-[12.5px] text-[color:var(--foreground)]">/island size large</code>,{" "}
+            <code className="font-mono text-[12.5px] text-[color:var(--foreground)]">/island screen primary</code>,{" "}
+            <code className="font-mono text-[12.5px] text-[color:var(--foreground)]">/island notch notch</code>,{" "}
+            <code className="font-mono text-[12.5px] text-[color:var(--foreground)]">/island off</code>.
+          </p>
+
+          <p className="mt-3 text-[13px] text-[color:var(--foreground-dim)] leading-relaxed">
             Run pi in multiple terminals — each session gets its own row,
             stacked into one continuous capsule.
           </p>
@@ -129,7 +152,7 @@ export default function Home() {
             <Step num={1} bold="A native Swift host" rest="renders a borderless, click-through WKWebView pinned above every Space and full-screen app." />
             <Step num={2} bold="pi's extension API" rest="streams each turn's status over a Unix domain socket to the host." />
             <Step num={3} bold="Every pi session" rest="gets its own row. Rows stack into a single capsule, sized to the longest row." />
-            <Step num={4} bold="Notch detection" rest="on MacBooks with a notch, /island2 splits the capsule to wrap around it cleanly." />
+            <Step num={4} bold="Notch detection" rest="on MacBooks with a notch, the capsule splits to wrap around it automatically — or force it on/off from the settings menu." />
             <Step num={5} bold="Zero chrome." rest="No dock icon, no Stage Manager clutter — it just lives at the top." />
           </ol>
 

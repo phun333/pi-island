@@ -14,6 +14,7 @@
 //   { "id": "<session-uuid>", "type": "remove" }
 //   { "id": "<session-uuid>", "type": "mode",    "mode":  "normal"|"notch" }
 //   { "id": "<session-uuid>", "type": "scale",   "scale": "small"|"medium"|"large" }
+//   { "id": "<session-uuid>", "type": "clear" }
 //   { "id": "<session-uuid>", "type": "respawn" }
 //
 // On startup the companion also reads ~/.pi/pi-island.json for settings it
@@ -24,6 +25,16 @@
 // When the last client disconnects we keep the window for 6s so a quick
 // reconnect (pi /new, /reload, etc.) doesn't flash the capsule closed,
 // then exit cleanly.
+//
+// `clear` vs `respawn` — both are "reset" hammers:
+//   • `clear`   is cheap: webview-only nuke of every row. Surviving
+//                clients simply re-upsert themselves on the next event.
+//                Use when phantom rows (SIGKILL'd sessions that never
+//                sent their `remove`) pile up.
+//   • `respawn` is a full daemon restart — closes the NSWindow, drops
+//                the socket, process.exit(0). The next client connection
+//                boots a fresh companion that re-reads the pref file
+//                (required for screen / notchMode changes).
 
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
@@ -223,6 +234,15 @@ const server = createServer((sock) => {
       // list so new sizes can land in index.ts + island.html.mjs without a
       // companion change.
       send(`window.island.setScale(${JSON.stringify(msg.scale)})`);
+      return;
+    }
+    if (msg.type === "clear") {
+      // Wipe every row from the webview. This does NOT drop connected
+      // sockets — live clients re-upsert themselves on their very next
+      // event (tool call, message update, etc.) so their own row
+      // reappears automatically. Dead clients' phantom rows are gone
+      // for good, which is the whole point.
+      send(`window.island.removeAllRows()`);
       return;
     }
     if (msg.type === "respawn") {

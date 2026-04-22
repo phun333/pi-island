@@ -6,6 +6,7 @@
 // Node → webview API (called via win.send from the companion):
 //   window.island.upsertRow(id, data)   — create or update a row
 //   window.island.removeRow(id)         — fade out + remove a row
+//   window.island.removeAllRows()       — clear every row (phantom reset)
 //   window.island.setMode("normal"|"notch")
 //
 // `data` shape:
@@ -444,6 +445,16 @@ body.notch-mode .row:first-child .t-sub { display: none; }
     }, 340);
   }
 
+  // Nuke every row in one shot — used by /island reset to evict phantom
+  // rows left behind when a pi session died without sending its own
+  // remove (SIGKILL'd terminal, OS crash, lost socket, …). We reuse
+  // removeRow() per id so the fade-out transition still plays; `order`
+  // is snapshotted because removeRow mutates it via the setTimeout.
+  function removeAllRows() {
+    var ids = order.slice();
+    for (var i = 0; i < ids.length; i++) removeRow(ids[i]);
+  }
+
   function setMode(mode) {
     document.body.className = mode === 'notch' ? 'notch-mode' : '';
   }
@@ -457,6 +468,7 @@ body.notch-mode .row:first-child .t-sub { display: none; }
   window.island = {
     upsertRow: upsertRow,
     removeRow: removeRow,
+    removeAllRows: removeAllRows,
     setMode: setMode,
     setScale: setScale,
   };

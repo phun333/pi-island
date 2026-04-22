@@ -51,10 +51,24 @@ Muscle memory / scripts:
 /island size large
 /island screen primary
 /island notch notch
+/island reset         # or: clear   — evict phantom rows, keep the companion alive
+/island reload        # or: restart — respawn the companion (heavier reset)
 ```
 
 Run pi in multiple terminals — each session gets its own row,
 stacked into one continuous capsule.
+
+### Stuck rows?
+
+If a pi terminal is force-quit (SIGKILL, crash, lost SSH, …) its row
+can stay "Working" forever because the cleanup message never shipped.
+
+- `/island reset`  → wipes every row; surviving sessions re-draw
+  themselves on the next event.
+- `/island reload` → fully respawns the companion daemon
+  (also recovers from window-level quirks after display changes).
+
+Both commands are also safe to run at any time as a quick refresh.
 
 ## Website
 

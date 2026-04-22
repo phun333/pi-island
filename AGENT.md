@@ -180,7 +180,22 @@ Missing fields fall back to defaults, so a v0.1.x pref file (just
 /island size   <small|medium|large|xlarge>
 /island screen <primary|active|2|3|...>
 /island notch  <auto|normal|notch>
+/island reset  | clear     — evict phantom rows (keeps companion alive)
+/island reload | restart   — respawn companion (heavier, re-reads pref file)
 ```
+
+**`reset` vs `reload`:** both recover from stuck "Working" rows left
+behind when a pi session died without sending its own `remove`
+(SIGKILL'd terminal, lost SSH, OS crash, …).
+- `reset` sends a `clear` socket message → companion calls
+  `window.island.removeAllRows()` → surviving sessions simply
+  re-upsert themselves on their next event. Cheap, no daemon restart.
+- `reload` goes through `respawnCompanion()` — full NSWindow close +
+  fresh process + pref reload. Slower but also recovers window-level
+  weirdness (wrong screen after monitor change, stuck notch mode, …).
+
+Helpers: `doReset` / `doReload` in `index.ts`. `sendClear` writes the
+new `{ type: "clear" }` socket message.
 
 **Removed in v0.2.0:** `/island2`. Its behaviour (force notch wrap)
 moved into the menu's `Notch wrap` row — and unlike the old command,
@@ -224,6 +239,11 @@ One JSON object per line. Writer: `writeMessage` in `index.ts`. Reader:
 
 // Size preset — flips the global --scale CSS var (live, no respawn)
 { "id": "...", "type": "scale",   "scale": "small" | "medium" | "large" | "xlarge" }
+
+// Wipe every row from the webview. Does NOT kick live sockets — they
+// simply re-upsert their row on the next event. Phantom rows (orphaned
+// by a crashed client) stay gone. Used by /island reset.
+{ "id": "...", "type": "clear" }
 
 // Graceful companion shutdown — client's next ensureConnection() spawns a
 // fresh instance that re-reads ~/.pi/pi-island.json (used for screen and

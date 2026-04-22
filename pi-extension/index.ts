@@ -286,6 +286,17 @@ export default function (pi: ExtensionAPI) {
     writeMessage({ id: SESSION_ID, type: "remove" });
   }
 
+  // Ask the companion to evict EVERY row from the webview. Used by
+  // /island reset to clear phantom rows left behind when other pi
+  // sessions died without sending their own `remove` (SIGKILL'd
+  // terminal, OS reboot, lost socket, …). The current session's row
+  // is re-upserted immediately after so the user's own capsule doesn't
+  // flicker away.
+  async function sendClear() {
+    if (!sock) { if (!(await ensureConnection())) return; }
+    writeMessage({ id: SESSION_ID, type: "clear" });
+  }
+
   // Ask the companion to cleanly exit so the client's next event respawns
   // it with fresh pref values. Used for settings that need a new NSWindow
   // (screen position, notch mode) — NSWindow geometry is fixed after spawn.
@@ -339,6 +350,55 @@ export default function (pi: ExtensionAPI) {
     persistPref();
     await respawnCompanion();
     ctx.ui.notify(`Island notch wrap → ${next}`, "info");
+  }
+
+  // `/island reset` — lightweight phantom sweep.
+  //
+  // Sends a single `clear` message so the companion calls
+  // `window.island.removeAllRows()`. Any still-alive pi session will
+  // re-upsert its own row on the next tool / message event, so only the
+  // orphaned rows (SIGKILL'd terminals etc.) stay gone. We also re-send
+  // the current session's state right away so the user who typed the
+  // command sees their own row reappear immediately instead of waiting
+  // for the next agent tick.
+  async function doReset(ctx: any) {
+    if (!shownForSession) {
+      ctx.ui.notify("Island is disabled — nothing to reset", "info");
+      return;
+    }
+    if (!(await ensureConnection())) {
+      ctx.ui.notify("Couldn't reach the island companion", "error");
+      return;
+    }
+    await sendClear();
+    // Re-show our own row so the reset feels instant for the active session.
+    if (inAgent) {
+      await sendUpdate("thinking", "");
+    } else if (startedAt != null) {
+      // Between agent runs: replay the last "done" so the user sees their
+      // capsule briefly and the 5s retract timer (if any) was already set.
+      await sendUpdate("done", "");
+    }
+    ctx.ui.notify("Island reset — phantom rows cleared", "info");
+  }
+
+  // `/island reload` — full daemon restart.
+  //
+  // Same hammer as respawnCompanion() but user-initiated. Closes the
+  // NSWindow, drops the socket, spawns a fresh companion which re-reads
+  // `~/.pi/pi-island.json` and gets a clean slate of rows. Heavier than
+  // /island reset but also recovers from window-level weirdness (wrong
+  // screen, stuck notch mode, stale CSS, …). Other live pi sessions
+  // will reconnect on their next event.
+  async function doReload(ctx: any) {
+    await respawnCompanion();
+    // Re-upsert our row against the fresh companion so the user sees
+    // something right away. If !inAgent we skip — the next event will
+    // bring us back, same as a cold start.
+    if (shownForSession && inAgent) {
+      await sendUpdate("thinking", "");
+    }
+    ctx.ui.notify("Island reloaded — companion respawned", "info");
   }
 
   // ── Settings menu — same UX as pi's /settings ────────────────────────────
@@ -523,11 +583,13 @@ export default function (pi: ExtensionAPI) {
   //   /island size <preset>     → set scale (small | medium | large)
   //   /island screen <value>    → set screen (primary | active | 2 | 3 ...)
   //   /island notch <mode>      → set notch wrap (auto | normal | notch)
+  //   /island reset             → clear phantom rows (keeps companion alive)
+  //   /island reload            → respawn companion (heavier reset)
   //
   // Subcommands let power users / scripts skip the menu. With no args the
   // menu is the friendlier path — same UX as pi's own /settings.
   pi.registerCommand("island", {
-    description: "Open pi-island settings (or /island size|screen|notch <value>)",
+    description: "Open pi-island settings (or /island size|screen|notch <value> | reset | reload)",
     handler: async (args, ctx) => {
       const parts = String(args ?? "").trim().split(/\s+/).filter(Boolean);
       if (parts.length === 0) {
@@ -542,6 +604,11 @@ export default function (pi: ExtensionAPI) {
         if (shownForSession) await doDisable(ctx); else await doEnable(ctx);
         return;
       }
+
+      // Phantom-row sweep: webview-only, keeps companion alive.
+      if (sub === "reset" || sub === "clear") { await doReset(ctx);  return; }
+      // Full companion respawn: heavier, also recovers NSWindow-level issues.
+      if (sub === "reload" || sub === "restart") { await doReload(ctx); return; }
 
       if (sub === "size") {
         const next = parts[1]?.toLowerCase();
@@ -598,7 +665,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       ctx.ui.notify(
-        `Unknown subcommand "${sub}". Try: /island (menu)  or  /island size|screen|notch <value>`,
+        `Unknown subcommand "${sub}". Try: /island (menu)  or  /island size|screen|notch <value>  or  /island reset|reload`,
         "error",
       );
     },

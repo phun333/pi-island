@@ -3,7 +3,7 @@ import Link from "next/link";
 const sections = [
   { href: "#overview", label: "Overview", active: true },
   { href: "#install", label: "Install" },
-  { href: "#commands", label: "Commands" },
+  { href: "#settings", label: "Settings" },
   { href: "#how-it-works", label: "How it works" },
 ];
 
@@ -12,12 +12,7 @@ const resources = [
   {
     href: "https://www.npmjs.com/package/pi-island",
     label: "npm",
-  },
-  {
-    href: "https://github.com/phun333/pi-island/blob/main/AGENT.md",
-    label: "AGENT.md",
-  },
-  { href: "https://github.com/phun333/pi-island/blob/main/LICENSE", label: "License" },
+  }
 ];
 
 export default function Sidebar() {
@@ -74,7 +69,7 @@ export default function Sidebar() {
           href="https://github.com/phun333/pi-island/releases"
           className="hover:text-[color:var(--foreground)] transition-colors underline underline-offset-2 decoration-dotted"
         >
-          v0.1.0
+          v0.2.0
         </a>
         <span>·</span>
         <a

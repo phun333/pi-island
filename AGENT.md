@@ -463,27 +463,27 @@ back (e.g. click-to-dismiss).
 
 ## 8. What is done
 
-- ✅ Window pinned top-of-screen above menu bar (all Macs)
-- ✅ Compact fixed-size window (no resize on state change)
-- ✅ Dot-loader + per-status colors (matches pi's own loader set)
-- ✅ Context % + elapsed timer (integer seconds, abbreviated in notch mode)
-- ✅ Multi-session stack (rows fuse into one capsule, shared dividers)
-- ✅ Demo mirrors real runtime dimensions
-- ✅ Middle slot is pixel-stable (absolute centered)
-- ✅ Auto idle-exit of companion 6 s after last client disconnects
-- ✅ GitHub Actions auto-publish on `v*` tag push
-- ✅ Default-on with persisted user preference (v0.1.1)
-- ✅ Settings menu via `ctx.ui.custom()` + pi-tui `SettingsList` (v0.2.0)
-- ✅ Size presets — `small`/`medium`/`large`/`xlarge` via `--scale` CSS var (v0.2.0)
-- ✅ Screen preference — `primary`/`active`/numeric index (v0.2.0)
-- ✅ Notch mode preference — `auto`/`normal`/`notch` (replaces `/island2`) (v0.2.0)
-- ✅ Project name overlap fix (issue #4) — source-side truncation + CSS ellipsis (v0.2.0)
-- ✅ Quick-action subcommands: `/island size|screen|notch|on|off|toggle` (v0.2.0)
-- ✅ Per-row `rowScale` demo hook for "all presets stacked" showcase (v0.2.0)
-- ✅ Ghost-row fix: explicit dispatch + per-socket id tracking + status whitelist (v0.2.1)
-- ✅ Auto-heal via version handshake — silent recovery after `npm update` (v0.2.1)
-- ✅ `/island reload` subcommand for manual state reset (v0.2.1)
-- ✅ One-time welcome notify on version change (v0.2.1)
+- [x] Window pinned top-of-screen above menu bar (all Macs)
+- [x] Compact fixed-size window (no resize on state change)
+- [x] Dot-loader + per-status colors (matches pi's own loader set)
+- [x] Context % + elapsed timer (integer seconds, abbreviated in notch mode)
+- [x] Multi-session stack (rows fuse into one capsule, shared dividers)
+- [x] Demo mirrors real runtime dimensions
+- [x] Middle slot is pixel-stable (absolute centered)
+- [x] Auto idle-exit of companion 6 s after last client disconnects
+- [x] GitHub Actions auto-publish on `v*` tag push
+- [x] Default-on with persisted user preference (v0.1.1)
+- [x] Settings menu via `ctx.ui.custom()` + pi-tui `SettingsList` (v0.2.0)
+- [x] Size presets — `small`/`medium`/`large`/`xlarge` via `--scale` CSS var (v0.2.0)
+- [x] Screen preference — `primary`/`active`/numeric index (v0.2.0)
+- [x] Notch mode preference — `auto`/`normal`/`notch` (replaces `/island2`) (v0.2.0)
+- [x] Project name overlap fix (issue #4) — source-side truncation + CSS ellipsis (v0.2.0)
+- [x] Quick-action subcommands: `/island size|screen|notch|on|off|toggle` (v0.2.0)
+- [x] Per-row `rowScale` demo hook for "all presets stacked" showcase (v0.2.0)
+- [x] Ghost-row fix: explicit dispatch + per-socket id tracking + status whitelist (v0.2.1)
+- [x] Auto-heal via version handshake — silent recovery after `npm update` (v0.2.1)
+- [x] `/island reload` subcommand for manual state reset (v0.2.1)
+- [x] One-time welcome notify on version change (v0.2.1)
 
 ---
 
@@ -705,6 +705,13 @@ caused confusing "why is the old binary running?" sessions.
   3. Settings menu row in `openSettingsMenu()` if user-configurable.
   4. §5 pref schema in this file.
 - Turkish user comms are fine; code / commits / docs stay English.
+- **No emojis anywhere.** Not in code, comments, commit messages,
+  release notes, docs, or UI strings. This includes decorative
+  checkmarks (use `- [x]`), status indicators (use words like
+  `OK` / `FAIL` / `RESOLVED`), tables, and README badges. Rationale:
+  consistency with the pi/pi-mono project style, noise reduction for
+  terminal rendering, and easier grep/diff. If a future agent adds
+  emojis, strip them before committing.
 
 ---
 

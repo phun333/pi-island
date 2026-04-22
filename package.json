@@ -24,7 +24,17 @@
     "build": "node scripts/build.mjs",
     "postinstall": "node scripts/postinstall.mjs",
     "demo": "node pi-extension/demo.mjs",
-    "demo:single": "node pi-extension/demo.mjs single"
+    "demo:single": "node pi-extension/demo.mjs single",
+
+    "dev:link": "npm link && node scripts/dev-status.mjs",
+    "dev:unlink": "npm unlink -g pi-island && npm i -g pi-island && node scripts/dev-status.mjs",
+    "dev:status": "node scripts/dev-status.mjs",
+
+    "pack:test": "node scripts/pack-test.mjs",
+
+    "release:patch": "npm version patch -m 'chore: release v%s' && git push --follow-tags && npm publish",
+    "release:minor": "npm version minor -m 'chore: release v%s' && git push --follow-tags && npm publish",
+    "release:major": "npm version major -m 'chore: release v%s' && git push --follow-tags && npm publish"
   },
   "files": [
     "pi-extension/index.ts",

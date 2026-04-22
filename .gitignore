@@ -36,6 +36,11 @@ ehthumbs.db
 Thumbs.db
 *.stackdump
 
+# ─── npm pack tarballs ──────────────────────────────────────────────────
+# Produced by `npm run pack:test`. Never commit — they are derivative
+# artifacts and contain the version number in the filename.
+pi-island-*.tgz
+
 # ─── Logs & temp ────────────────────────────────────────────────────────
 *.log
 logs/

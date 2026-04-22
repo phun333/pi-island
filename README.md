@@ -36,6 +36,11 @@ A minimal informational site lives in [`web/`](web/) — built with Next.js 16
 and the [pi.dev](https://pi.dev) palette, deployable to Vercel with
 `Root Directory = web`. See [`web/README.md`](web/README.md).
 
+## Development
+
+Dev/release workflow (link, pack-test, publish) is documented in
+[`docs/RELEASING.md`](docs/RELEASING.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

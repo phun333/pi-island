@@ -61,7 +61,8 @@
     "node": ">=18"
   },
   "os": [
-    "darwin"
+    "darwin",
+    "win32"
   ],
   "repository": {
     "type": "git",

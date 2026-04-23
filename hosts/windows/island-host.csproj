@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>PiIsland</RootNamespace>
+    <AssemblyName>island-host-win</AssemblyName>
+    <!-- Keep binary small — requires .NET Desktop Runtime on the machine.
+         Switch to SelfContained=true (adds ~60 MB) only if users report
+         missing runtime errors. -->
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- WebView2 control for WPF. The actual WebView2 Runtime is pre-installed
+         on Windows 10/11 (ships with Edge). This NuGet only provides the
+         managed wrapper + WebView2Loader.dll. -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.*" />
+  </ItemGroup>
+</Project>

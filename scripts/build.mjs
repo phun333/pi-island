@@ -46,8 +46,11 @@ if (process.platform === "darwin") {
 // ── Windows ────────────────────────────────────────────────────────────────
 if (process.platform === "win32") {
   const csproj = join(repoRoot, "hosts", "windows", "island-host.csproj");
-  const outDir = join(repoRoot, "hosts", "windows", "out");
-  const outputExe = join(repoRoot, "pi-extension", "island-host-win.exe");
+  // Build output goes directly into pi-extension/hosts/windows/ where
+  // open-fixed.mjs expects it. Framework-dependent builds produce multiple
+  // files (.exe + .dll + .deps.json + runtimes/) that must stay together.
+  const outDir = join(repoRoot, "pi-extension", "hosts", "windows");
+  const outputExe = join(outDir, "island-host-win.exe");
 
   if (!existsSync(csproj)) {
     console.error("[pi-island] Missing csproj:", csproj);
@@ -69,6 +72,7 @@ if (process.platform === "win32") {
     "publish", csproj,
     "-c", "Release",
     "-r", "win-x64",
+    "--self-contained", "false",
     "-o", outDir,
     "--nologo",
   ], { stdio: "inherit" });
@@ -78,14 +82,11 @@ if (process.platform === "win32") {
     process.exit(result.status ?? 1);
   }
 
-  // Copy the built exe to the pi-extension directory where open-fixed.mjs expects it
-  const builtExe = join(outDir, "island-host-win.exe");
-  if (!existsSync(builtExe)) {
-    console.error("[pi-island] Build succeeded but exe not found at", builtExe);
+  if (!existsSync(outputExe)) {
+    console.error("[pi-island] Build succeeded but exe not found at", outputExe);
     process.exit(1);
   }
 
-  copyFileSync(builtExe, outputExe);
   console.log("[pi-island] Built", outputExe);
   process.exit(0);
 }

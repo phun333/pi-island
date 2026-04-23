@@ -10,6 +10,7 @@ pnpm-debug.log*
 # or pulled from platform packages (install). Never commit them.
 pi-extension/island-host-bin
 pi-extension/island-host-win.exe
+pi-extension/hosts/windows/
 .build-skipped
 
 # Platform package binaries — built by CI, not committed

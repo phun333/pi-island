@@ -1,23 +1,26 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
+    <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>PiIsland</RootNamespace>
     <AssemblyName>island-host-win</AssemblyName>
-    <!-- Self-contained bundles the .NET runtime so end users don't need
-         to install anything. WPF does not support PublishTrimmed, so the
-         binary is ~50-60 MB. PublishSingleFile packs everything into one
-         .exe for clean distribution. -->
-    <SelfContained>true</SelfContained>
-    <PublishSingleFile>true</PublishSingleFile>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Framework-dependent: small binary (~3 MB), requires .NET Desktop
+         Runtime on the user's machine. Same approach as other pi extensions. -->
+    <SelfContained>false</SelfContained>
+    <RollForward>LatestMajor</RollForward>
+    <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
   </PropertyGroup>
   <ItemGroup>
-    <!-- WebView2 control for WPF. The actual WebView2 Runtime is pre-installed
-         on Windows 10/11 (ships with Edge). This NuGet only provides the
-         managed wrapper + WebView2Loader.dll. -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.*" />
   </ItemGroup>
+  <!-- Remove WPF reference that WebView2 NuGet pulls in — we use WinForms only. -->
+  <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(FileName)' == 'Microsoft.Web.WebView2.Wpf'" />
+      <ReferencePath Remove="@(ReferencePath)" Condition="'%(FileName)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
 </Project>

@@ -33,7 +33,9 @@ function resolveBinary() {
   }
 
   if (process.platform === "win32") {
-    const bin = join(here, "island-host-win.exe");
+    // Framework-dependent build produces multiple files in a directory.
+    // The exe must run from that directory so it can find its DLLs.
+    const bin = join(here, "hosts", "windows", "island-host-win.exe");
     if (existsSync(bin)) return bin;
     throw new Error(
       "pi-island: Windows host binary not found at " + bin + "\n" +
@@ -84,7 +86,14 @@ class FixedWindow extends EventEmitter {
 
   #write(obj) {
     if (this.#closed) return;
-    try { this.#proc.stdin.write(JSON.stringify(obj) + "\n"); } catch {}
+    try {
+      // Escape all non-ASCII to \uXXXX so the stdin pipe carries only
+      // ASCII bytes. Fixes Turkish/Unicode corruption on Windows where
+      // the pipe encoding may not be UTF-8.
+      const json = JSON.stringify(obj).replace(/[\u0080-\uffff]/g,
+        (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+      this.#proc.stdin.write(json + "\n");
+    } catch {}
   }
 
   send(js)        { this.#write({ type: "eval", js }); }

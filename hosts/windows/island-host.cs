@@ -1,63 +1,40 @@
 // island-host.cs — Windows native host for pi-island
 // --------------------------------------------------
-// C# WPF + WebView2 equivalent of the macOS Swift host (island-host.swift).
-// Speaks the same stdin/stdout JSON-line protocol so companion.mjs works
-// identically on both platforms.
+// WinForms + WebView2 host that speaks the same stdin/stdout JSON-line
+// protocol as the macOS Swift host. Transparency is achieved via the
+// TransparencyKey trick (magenta background = see-through) which avoids
+// the WPF AllowsTransparency + WebView2 GPU crash entirely.
 //
-// Protocol (stdin, one JSON object per line):
-//   { "type": "html",  "html": "<base64-encoded-document>" }
-//   { "type": "eval",  "js": "window.island.upsertRow(...)" }
-//   { "type": "close" }
+// Protocol (stdin):  { "type": "html"|"eval"|"close", ... }
+// Protocol (stdout): { "type": "ready"|"closed", ... }
 //
-// Protocol (stdout, one JSON object per line):
-//   { "type": "ready",  "screen": {...} }
-//   { "type": "closed" }
-//
-// argv:
-//   --width N --height N --x N --y N
-//   --frameless --floating --transparent --click-through --no-dock --hidden
-//
-// Build:
-//   dotnet publish -c Release -r win-x64 --self-contained false
+// Build: dotnet publish -c Release -r win-x64 --self-contained false
 
-using System;
-using System.IO;
+using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Threading;
-using System.Runtime.InteropServices;
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
-using Microsoft.Web.WebView2.Wpf;
+using Microsoft.Web.WebView2.WinForms;
 
 namespace PiIsland;
 
-// ── Stdout helper (thread-safe) ────────────────────────────────────────────
+// ── Stdout (thread-safe) ───────────────────────────────────────────────────
 
 static class Stdout
 {
     private static readonly object Lock = new();
-
     public static void Write(JsonObject obj)
     {
         var json = obj.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
-        lock (Lock)
-        {
-            Console.Out.WriteLine(json);
-            Console.Out.Flush();
-        }
+        lock (Lock) { Console.Out.WriteLine(json); Console.Out.Flush(); }
     }
 }
 
-// ── Stderr logger ──────────────────────────────────────────────────────────
-
 static class Log
 {
-    public static void Info(string msg) =>
-        Console.Error.WriteLine($"[island-host] {msg}");
+    public static void Info(string msg) => Console.Error.WriteLine($"[island-host] {msg}");
 }
 
 // ── CLI config ─────────────────────────────────────────────────────────────
@@ -83,75 +60,45 @@ class Config
         {
             switch (args[i])
             {
-                case "--width":
-                    if (++i < args.Length && int.TryParse(args[i], out var w)) c.Width = w;
-                    break;
-                case "--height":
-                    if (++i < args.Length && int.TryParse(args[i], out var h)) c.Height = h;
-                    break;
-                case "--title":
-                    if (++i < args.Length) c.Title = args[i];
-                    break;
-                case "--x":
-                    if (++i < args.Length && int.TryParse(args[i], out var x)) c.X = x;
-                    break;
-                case "--y":
-                    if (++i < args.Length && int.TryParse(args[i], out var y)) c.Y = y;
-                    break;
-                case "--frameless":    c.Frameless = true; break;
-                case "--floating":     c.Floating = true; break;
-                case "--transparent":  c.Transparent = true; break;
+                case "--width":  if (++i < args.Length && int.TryParse(args[i], out var w)) c.Width = w; break;
+                case "--height": if (++i < args.Length && int.TryParse(args[i], out var h)) c.Height = h; break;
+                case "--title":  if (++i < args.Length) c.Title = args[i]; break;
+                case "--x":      if (++i < args.Length && int.TryParse(args[i], out var x)) c.X = x; break;
+                case "--y":      if (++i < args.Length && int.TryParse(args[i], out var y)) c.Y = y; break;
+                case "--frameless":     c.Frameless = true; break;
+                case "--floating":      c.Floating = true; break;
+                case "--transparent":   c.Transparent = true; break;
                 case "--click-through": c.ClickThrough = true; break;
-                case "--no-dock":      c.NoDock = true; break;
-                case "--hidden":       c.Hidden = true; break;
+                case "--no-dock":       c.NoDock = true; break;
+                case "--hidden":        c.Hidden = true; break;
             }
         }
         return c;
     }
 }
 
-// ── Main window ────────────────────────────────────────────────────────────
+// ── Host ────────────────────────────────────────────────────────────────────
 
-class IslandWindow : Window
+sealed class IslandHost : IDisposable
 {
-    // ── Win32 interop ──────────────────────────────────────────────────────
-
-    const int GWL_EXSTYLE = -20;
-    const int WS_EX_TRANSPARENT  = 0x00000020;
-    const int WS_EX_LAYERED      = 0x00080000;
-    const int WS_EX_TOOLWINDOW   = 0x00000080;
-    const int WS_EX_NOACTIVATE   = 0x08000000;
+    // Win32 interop
+    const int GWL_EXSTYLE      = -20;
+    const int WS_EX_TRANSPARENT = 0x00000020;
+    const int WS_EX_TOOLWINDOW  = 0x00000080;
+    const int WS_EX_TOPMOST     = 0x00000008;
+    const int WS_EX_NOACTIVATE  = 0x08000000;
 
     static readonly IntPtr HWND_TOPMOST = new(-1);
-    const uint SWP_NOSIZE     = 0x0001;
     const uint SWP_NOMOVE     = 0x0002;
+    const uint SWP_NOSIZE     = 0x0001;
     const uint SWP_NOACTIVATE = 0x0010;
+    const uint SWP_SHOWWINDOW = 0x0040;
 
-    [DllImport("user32.dll")]
-    static extern int GetWindowLong(IntPtr hwnd, int nIndex);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int i, int v);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int w, int ht, uint f);
 
-    [DllImport("user32.dll")]
-    static extern int SetWindowLong(IntPtr hwnd, int nIndex, int dwNewLong);
-
-    [DllImport("user32.dll")]
-    static extern bool SetWindowPos(
-        IntPtr hwnd, IntPtr hwndInsertAfter,
-        int x, int y, int cx, int cy, uint uFlags);
-
-    [DllImport("user32.dll")]
-    static extern bool SetLayeredWindowAttributes(
-        IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
-
-    const uint LWA_ALPHA = 0x02;
-
-
-
-
-
-    // ── Bridge JS ──────────────────────────────────────────────────────────
-    // Same API surface as the Swift host's window.islandHost, but uses
-    // WebView2's chrome.webview.postMessage instead of webkit messageHandlers.
-
+    // Bridge JS — same API as Swift host's window.islandHost
     const string BridgeJs = """
         window.islandHost = {
             cursorTip: null,
@@ -164,233 +111,189 @@ class IslandWindow : Window
         };
         """;
 
-    // ── Instance state ─────────────────────────────────────────────────────
-
     private readonly Config _config;
-    private WebView2? _webView;
+    private readonly WebView2 _webView;
+    private int _exiting;
 
-    // ── Constructor ────────────────────────────────────────────────────────
+    public Form Form { get; }
 
-    public IslandWindow(Config config)
+    public IslandHost(Config config)
     {
         _config = config;
-        Title = config.Title;
-        ResizeMode = ResizeMode.NoResize;
+
+        Form = new Form
+        {
+            Text = config.Title,
+            Width = config.Width,
+            Height = config.Height,
+            ShowInTaskbar = false,
+            StartPosition = (config.X.HasValue && config.Y.HasValue)
+                ? FormStartPosition.Manual
+                : FormStartPosition.CenterScreen,
+        };
 
         // Frameless
         if (config.Frameless)
-            WindowStyle = WindowStyle.None;
+            Form.FormBorderStyle = FormBorderStyle.None;
 
-        // Transparent background via WPF layered window. WebView2's GPU
-        // renderer crashes with layered windows, so we disable GPU in the
-        // WebView2 environment options (see OnLoaded). Software rendering
-        // is fine for a tiny status capsule.
+        // Transparency via TransparencyKey trick: magenta background becomes
+        // see-through. No AllowsTransparency, no layered windows, no GPU
+        // crash — WebView2 works perfectly with this approach.
         if (config.Transparent)
         {
-            AllowsTransparency = true;
-            Background = Brushes.Transparent;
+            Form.AllowTransparency = true;
+            Form.BackColor = Color.Magenta;
+            Form.TransparencyKey = Color.Magenta;
         }
 
-        // Always on top
-        Topmost = config.Floating;
+        // Position
+        if (config.X.HasValue && config.Y.HasValue)
+            Form.Location = new Point(config.X.Value, config.Y.Value);
 
-        // No taskbar icon (Win32 WS_EX_TOOLWINDOW added in OnSourceInitialized
-        // for full Alt+Tab removal; this covers the taskbar button)
-        ShowInTaskbar = !config.NoDock;
-
-        // Window size — set in DIPs here; position is set via Win32 in
-        // OnSourceInitialized to avoid DPI mismatch (companion sends
-        // physical pixel coordinates).
-        Width = config.Width;
-        Height = config.Height;
-
-        // If no explicit position, center on screen.
-        if (!config.X.HasValue || !config.Y.HasValue)
-            WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        else
-            WindowStartupLocation = WindowStartupLocation.Manual;
-
+        // Hidden
         if (config.Hidden)
-            Visibility = Visibility.Hidden;
+            Form.Opacity = 0;
 
-        Loaded += OnLoaded;
-        Closed += OnClosed;
+        // WebView2
+        _webView = new WebView2
+        {
+            Dock = DockStyle.Fill,
+            DefaultBackgroundColor = config.Transparent ? Color.Transparent : Color.White,
+        };
+        Form.Controls.Add(_webView);
+
+        // Events
+        Form.Load += async (_, _) => await InitializeAsync();
+        Form.HandleCreated += (_, _) => ApplyExtendedStyles();
+        Form.Shown += (_, _) =>
+        {
+            if (config.ClickThrough)
+                ShowPassive();
+            if (config.Hidden)
+            {
+                Form.Hide();
+                Form.Opacity = 1;
+            }
+        };
+        Form.FormClosing += (_, _) => CloseAndExit();
+
+        // Stdin reader on background thread
+        _ = Task.Run(ReadStdinAsync);
     }
 
-    // ── Win32 extended styles ──────────────────────────────────────────────
+    // ── Extended window styles ──────────────────────────────────────────────
 
-    protected override void OnSourceInitialized(EventArgs e)
+    private void ApplyExtendedStyles()
     {
-        base.OnSourceInitialized(e);
+        if (!Form.IsHandleCreated) return;
+        var style = GetWindowLong(Form.Handle, GWL_EXSTYLE);
 
-        var hwnd = new WindowInteropHelper(this).Handle;
-        var exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-
-        // Click-through: AllowsTransparency already sets WS_EX_LAYERED.
-        // WS_EX_TRANSPARENT makes the layered window pass-through for
-        // mouse hit-testing.
+        // Click-through: mouse events pass to windows below
         if (_config.ClickThrough)
-            exStyle |= WS_EX_TRANSPARENT;
+            style |= WS_EX_TRANSPARENT;
 
-        // Tool window: no taskbar entry, no Alt+Tab
+        // No taskbar, no Alt+Tab
         if (_config.NoDock)
-            exStyle |= WS_EX_TOOLWINDOW;
+            style |= WS_EX_TOOLWINDOW;
 
-        // Don't steal focus on show
-        exStyle |= WS_EX_NOACTIVATE;
+        // Don't steal focus
+        style |= WS_EX_NOACTIVATE;
 
-        SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
+        SetWindowLong(Form.Handle, GWL_EXSTYLE, style);
 
-        // Place window using physical pixel coordinates from companion.
-        // SetWindowPos works in physical pixels, bypassing WPF DPI scaling.
-        if (_config.X.HasValue && _config.Y.HasValue)
-        {
-            SetWindowPos(hwnd, IntPtr.Zero,
-                _config.X.Value, _config.Y.Value,
-                _config.Width, _config.Height,
-                SWP_NOACTIVATE);
-        }
-
-        // Ensure topmost at Win32 level (belt-and-braces with WPF Topmost)
+        // Always on top via Win32
         if (_config.Floating)
-        {
-            SetWindowPos(hwnd, HWND_TOPMOST,
-                0, 0, 0, 0,
+            SetWindowPos(Form.Handle, HWND_TOPMOST, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        }
     }
 
-    // ── WebView2 setup ─────────────────────────────────────────────────────
-
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    private void ShowPassive()
     {
-        _webView = new WebView2();
+        SetWindowPos(Form.Handle, HWND_TOPMOST,
+            0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
 
-        // Transparent background — must be set BEFORE EnsureCoreWebView2Async.
-        _webView.DefaultBackgroundColor = System.Drawing.Color.Transparent;
-        Content = _webView;
+    // ── WebView2 init ──────────────────────────────────────────────────────
 
+    private async Task InitializeAsync()
+    {
         try
         {
-            // Dedicated user-data folder so pi-island doesn't collide with
-            // other WebView2 apps on the same machine.
             var userDataFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "pi-island", "webview2");
-            var options = new CoreWebView2EnvironmentOptions();
-            // Fallback: if DWM transparency still causes GPU issues, disable
-            // GPU compositing. This uses software rendering (slightly slower
-            // but compatible with all transparency modes).
-            // Disable GPU — WebView2's GPU renderer crashes with WPF
-            // layered windows (AllowsTransparency=true). Software rendering
-            // is fine for a tiny status capsule.
-            options.AdditionalBrowserArguments = "--disable-gpu";
-            var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
+            var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
             await _webView.EnsureCoreWebView2Async(env);
         }
         catch (Exception ex)
         {
             Log.Info($"WebView2 init failed: {ex.Message}");
             Log.Info("Install WebView2 Runtime: https://developer.microsoft.com/en-us/microsoft-edge/webview2/");
-            Stdout.Write(new JsonObject { ["type"] = "closed" });
-            Environment.Exit(1);
+            CloseAndExit();
             return;
         }
 
-        // Inject bridge on every page load (same as Swift host's WKUserScript)
+        // Bridge injection
         await _webView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(BridgeJs);
 
-        // Suppress DevTools, context menu, etc. for a clean capsule look.
+        // Clean capsule look
         _webView.CoreWebView2.Settings.AreDevToolsEnabled = false;
         _webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
         _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
         _webView.CoreWebView2.Settings.IsZoomControlEnabled = false;
 
-        // Handle messages from the WebView (window.islandHost.send / .close)
-        _webView.CoreWebView2.WebMessageReceived += OnWebMessage;
-
-        // Emit "ready" after every navigation — companion uses the first one
-        // to send the island HTML, the second one to start pushing JS evals.
-        _webView.CoreWebView2.NavigationCompleted += (_, _) => EmitReady();
-
-        // Load blank page to trigger first "ready"
-        _webView.CoreWebView2.NavigateToString("<html><body></body></html>");
-
-        // Start reading commands from stdin
-        StartStdinReader();
-    }
-
-    // ── WebView message handler ────────────────────────────────────────────
-
-    private void OnWebMessage(object? sender, CoreWebView2WebMessageReceivedEventArgs args)
-    {
-        try
-        {
-            var raw = args.TryGetWebMessageAsString();
-            if (raw == null) return;
-
-            var msg = JsonNode.Parse(raw);
-            if (msg == null) return;
-
-            if (msg["__islandHost_close"]?.GetValue<bool>() == true)
-            {
-                CloseAndExit();
-                return;
-            }
-
-            var output = new JsonObject { ["type"] = "message" };
-            output["data"] = JsonNode.Parse(raw);
-            Stdout.Write(output);
-        }
-        catch { /* ignore malformed messages */ }
-    }
-
-    // ── Stdin reader (background thread) ───────────────────────────────────
-
-    private void StartStdinReader()
-    {
-        var thread = new Thread(() =>
+        // WebView messages
+        _webView.CoreWebView2.WebMessageReceived += (_, args) =>
         {
             try
             {
-                string? line;
-                while ((line = Console.ReadLine()) != null)
-                {
-                    var trimmed = line.Trim();
-                    if (string.IsNullOrEmpty(trimmed)) continue;
-
-                    try
-                    {
-                        var json = JsonNode.Parse(trimmed);
-                        var type = json?["type"]?.GetValue<string>();
-                        if (type == null) continue;
-
-                        // Dispatch to UI thread
-                        Dispatcher.Invoke(() => HandleCommand(type, json!));
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Info($"Bad JSON: {trimmed} ({ex.Message})");
-                    }
-                }
+                var raw = args.TryGetWebMessageAsString();
+                if (raw == null) return;
+                var msg = JsonNode.Parse(raw);
+                if (msg?["__islandHost_close"]?.GetValue<bool>() == true)
+                { CloseAndExit(); return; }
+                var output = new JsonObject { ["type"] = "message" };
+                output["data"] = JsonNode.Parse(raw);
+                Stdout.Write(output);
             }
-            catch { /* stdin closed or broken pipe */ }
-
-            // stdin EOF — companion died or closed the pipe.
-            // Force exit aggressively — Dispatcher.Invoke can deadlock
-            // if the UI thread is stuck. Belt and braces: try polite
-            // first, then force-kill after 1 second.
-            try { Dispatcher.Invoke(CloseAndExit); }
-            catch { /* Dispatcher dead or window gone */ }
-            // If we're still alive, force exit from this thread.
-            Thread.Sleep(1000);
-            Environment.Exit(0);
-        })
-        {
-            IsBackground = true,
-            Name = "StdinReader"
+            catch { }
         };
-        thread.Start();
+
+        // Ready after every navigation
+        _webView.CoreWebView2.NavigationCompleted += (_, _) => EmitReady();
+
+        // Trigger first ready
+        _webView.CoreWebView2.NavigateToString("<html><body></body></html>");
+    }
+
+    // ── Stdin reader ───────────────────────────────────────────────────────
+
+    private async Task ReadStdinAsync()
+    {
+        try
+        {
+            string? line;
+            while ((line = await Console.In.ReadLineAsync()) != null)
+            {
+                var trimmed = line.Trim();
+                if (string.IsNullOrEmpty(trimmed)) continue;
+                try
+                {
+                    var json = JsonNode.Parse(trimmed);
+                    var type = json?["type"]?.GetValue<string>();
+                    if (type == null) continue;
+                    Form.Invoke(() => HandleCommand(type, json!));
+                }
+                catch (Exception ex) { Log.Info($"Bad JSON: {trimmed} ({ex.Message})"); }
+            }
+        }
+        catch { }
+
+        // stdin EOF — force exit
+        try { Form.Invoke(CloseAndExit); } catch { }
+        Thread.Sleep(1000);
+        Environment.Exit(0);
     }
 
     // ── Command dispatch ───────────────────────────────────────────────────
@@ -401,94 +304,77 @@ class IslandWindow : Window
         {
             case "html":
             {
-                var base64 = json["html"]?.GetValue<string>();
-                if (base64 == null) { Log.Info("html: missing payload"); return; }
+                var b64 = json["html"]?.GetValue<string>();
+                if (b64 == null) { Log.Info("html: missing payload"); return; }
                 try
                 {
-                    var htmlBytes = Convert.FromBase64String(base64);
-                    var html = Encoding.UTF8.GetString(htmlBytes);
-                    _webView?.CoreWebView2?.NavigateToString(html);
+                    var html = Encoding.UTF8.GetString(Convert.FromBase64String(b64));
+                    _webView.CoreWebView2?.NavigateToString(html);
                 }
                 catch (Exception ex) { Log.Info($"html: {ex.Message}"); }
                 break;
             }
-
             case "eval":
             {
                 var js = json["js"]?.GetValue<string>();
                 if (js == null) { Log.Info("eval: missing js"); return; }
-                _ = _webView?.CoreWebView2?.ExecuteScriptAsync(js);
+                _ = _webView.CoreWebView2?.ExecuteScriptAsync(js);
                 break;
             }
-
             case "close":
                 CloseAndExit();
                 break;
-
             default:
                 Log.Info($"Unknown command: {type}");
                 break;
         }
     }
 
-    // ── Ready message ──────────────────────────────────────────────────────
-
     private void EmitReady()
     {
         var ready = new JsonObject { ["type"] = "ready" };
-        // Basic screen info — companion uses platform.mjs for geometry;
-        // this is here for protocol parity with the Swift host.
         try
         {
-            var area = SystemParameters.WorkArea;
-            ready["screen"] = new JsonObject
+            var scr = Screen.PrimaryScreen;
+            if (scr != null)
             {
-                ["width"]  = (int)SystemParameters.PrimaryScreenWidth,
-                ["height"] = (int)SystemParameters.PrimaryScreenHeight,
-                ["visibleWidth"]  = (int)area.Width,
-                ["visibleHeight"] = (int)area.Height,
-            };
+                ready["screen"] = new JsonObject
+                {
+                    ["width"] = scr.Bounds.Width,
+                    ["height"] = scr.Bounds.Height,
+                    ["visibleWidth"] = scr.WorkingArea.Width,
+                    ["visibleHeight"] = scr.WorkingArea.Height,
+                };
+            }
         }
-        catch { /* best-effort */ }
+        catch { }
         Stdout.Write(ready);
     }
 
-    // ── Cleanup ────────────────────────────────────────────────────────────
-
-    private void OnClosed(object? sender, EventArgs e)
-    {
-        Stdout.Write(new JsonObject { ["type"] = "closed" });
-        Environment.Exit(0);
-    }
-
-    private static int _exiting;
-
     private void CloseAndExit()
     {
-        // Guard against double-exit (stdin EOF + window close race)
         if (Interlocked.Exchange(ref _exiting, 1) == 1) return;
         try { Stdout.Write(new JsonObject { ["type"] = "closed" }); } catch { }
-        // Environment.Exit is the nuclear option — kills all threads,
-        // releases all handles. Needed because WPF's Application.Shutdown
-        // can hang if WebView2 is mid-navigation.
         Environment.Exit(0);
     }
+
+    public void Dispose() => _webView.Dispose();
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────
 
-class Program
+static class Program
 {
     [STAThread]
     static void Main(string[] args)
     {
+        // UTF-8 for stdin/stdout — without this, Turkish characters (Ş, İ),
+        // braille spinners, curly quotes, and other Unicode get corrupted.
+        Console.InputEncoding = Encoding.UTF8;
+        Console.OutputEncoding = Encoding.UTF8;
+        ApplicationConfiguration.Initialize();
         var config = Config.Parse(args);
-        var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
-        var window = new IslandWindow(config);
-
-        if (!config.Hidden)
-            window.Show();
-
-        app.Run(window);
+        using var host = new IslandHost(config);
+        Application.Run(host.Form);
     }
 }

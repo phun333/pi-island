@@ -1,6 +1,6 @@
 {
   "name": "@pi-island/darwin-x64",
-  "version": "0.3.0-beta.4",
+  "version": "0.3.0-beta.5",
   "description": "pi-island native host binary for macOS x64 (Intel)",
   "os": [
     "darwin"

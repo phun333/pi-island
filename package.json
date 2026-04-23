@@ -1,6 +1,6 @@
 {
   "name": "pi-island",
-  "version": "0.3.0-beta.4",
+  "version": "0.3.0-beta.5",
   "description": "macOS Dynamic-Island-style status capsule for the pi coding agent. Shows what pi is doing in real time, at the very top of your screen — with native notch-wrap support for MacBooks.",
   "type": "module",
   "keywords": [
@@ -49,9 +49,9 @@
     "LICENSE"
   ],
   "optionalDependencies": {
-    "@pi-island/darwin-arm64": "0.3.0-beta.4",
-    "@pi-island/darwin-x64": "0.3.0-beta.4",
-    "@pi-island/win32-x64": "0.3.0-beta.4"
+    "@pi-island/darwin-arm64": "0.3.0-beta.5",
+    "@pi-island/darwin-x64": "0.3.0-beta.5",
+    "@pi-island/win32-x64": "0.3.0-beta.5"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",

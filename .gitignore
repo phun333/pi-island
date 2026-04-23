@@ -9,7 +9,7 @@ pnpm-debug.log*
 # Build artifacts — native host binaries are compiled per-machine (dev)
 # or pulled from platform packages (install). Never commit them.
 pi-extension/island-host-bin
-pi-extension/island-host.exe
+pi-extension/island-host-win.exe
 .build-skipped
 
 # Platform package binaries — built by CI, not committed

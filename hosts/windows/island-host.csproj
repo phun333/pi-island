@@ -5,10 +5,12 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>PiIsland</RootNamespace>
     <AssemblyName>island-host-win</AssemblyName>
-    <!-- Keep binary small — requires .NET Desktop Runtime on the machine.
-         Switch to SelfContained=true (adds ~60 MB) only if users report
-         missing runtime errors. -->
-    <SelfContained>false</SelfContained>
+    <!-- Self-contained bundles the .NET runtime so end users don't need
+         to install anything. PublishTrimmed strips unused code to keep
+         the binary reasonable (~20-30 MB instead of ~60 MB). -->
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>link</TrimMode>
   </PropertyGroup>
   <ItemGroup>
     <!-- WebView2 control for WPF. The actual WebView2 Runtime is pre-installed

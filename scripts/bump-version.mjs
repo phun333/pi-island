@@ -31,22 +31,35 @@ const OPTIONAL_DEP_NAMES = [
 // ── Parse argument ─────────────────────────────────────────────────────────
 const arg = process.argv[2];
 if (!arg) {
-  console.error("Usage: node bump-version.mjs <patch|minor|major|x.y.z>");
+  console.error("Usage: node bump-version.mjs <patch|minor|major|beta|x.y.z|x.y.z-beta.N>");
   process.exit(1);
 }
 
 // Read current version from main package.json
 const mainPkg = JSON.parse(readFileSync(PACKAGE_FILES[0], "utf8"));
 const current = mainPkg.version;
-const [maj, min, pat] = current.split(".").map(Number);
+// Strip any pre-release suffix for base version math
+const base = current.replace(/-.*$/, "");
+const [maj, min, pat] = base.split(".").map(Number);
 
 let next;
 if (arg === "patch") next = `${maj}.${min}.${pat + 1}`;
 else if (arg === "minor") next = `${maj}.${min + 1}.0`;
 else if (arg === "major") next = `${maj + 1}.0.0`;
-else if (/^\d+\.\d+\.\d+$/.test(arg)) next = arg;
+else if (arg === "beta") {
+  // If already a beta, bump the beta number. Otherwise start beta.1
+  // of the next minor version.
+  const betaMatch = current.match(/-beta\.(\d+)$/);
+  if (betaMatch) {
+    const betaNum = parseInt(betaMatch[1], 10) + 1;
+    next = `${base}-beta.${betaNum}`;
+  } else {
+    next = `${maj}.${min + 1}.0-beta.1`;
+  }
+}
+else if (/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(arg)) next = arg;
 else {
-  console.error(`Invalid argument: "${arg}". Use patch, minor, major, or x.y.z`);
+  console.error(`Invalid argument: "${arg}". Use patch, minor, major, beta, or x.y.z[-suffix]`);
   process.exit(1);
 }
 

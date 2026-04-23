@@ -1,26 +1,107 @@
-name: Publish to npm
+name: Build & Publish
 
-# Runs when you push a version tag like v0.1.0, v1.2.3, etc.
+# Triggered on version tags: v0.3.0, v0.3.0-beta.1, etc.
 on:
   push:
     tags:
       - "v*"
 
 jobs:
-  publish:
-    runs-on: macos-latest   # need macOS so postinstall can compile the Swift host
+  # ── Build platform binaries ───────────────────────────────────────────────
+  build-darwin-arm64:
+    runs-on: macos-14    # Apple Silicon runner
     steps:
       - uses: actions/checkout@v4
+      - run: swiftc -O hosts/macos/island-host.swift -o island-host-bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-arm64
+          path: island-host-bin
 
+  build-darwin-x64:
+    runs-on: macos-13    # Intel runner
+    steps:
+      - uses: actions/checkout@v4
+      - run: swiftc -O hosts/macos/island-host.swift -o island-host-bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: darwin-x64
+          path: island-host-bin
+
+  build-win32-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - run: dotnet publish hosts/windows/island-host.csproj -c Release -r win-x64 -o out --nologo
+      - uses: actions/upload-artifact@v4
+        with:
+          name: win32-x64
+          path: out/island-host-win.exe
+
+  # ── Publish all packages ──────────────────────────────────────────────────
+  publish:
+    needs: [build-darwin-arm64, build-darwin-x64, build-win32-x64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      # Install deps + compile island-host-bin via postinstall
-      - run: npm install
+      # Download all platform binaries
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin-arm64
+          path: packages/darwin-arm64/
+      - uses: actions/download-artifact@v4
+        with:
+          name: darwin-x64
+          path: packages/darwin-x64/
+      - uses: actions/download-artifact@v4
+        with:
+          name: win32-x64
+          path: packages/win32-x64/
 
-      # Publish to npm (public access — required for scoped packages).
-      - run: npm publish --access public
+      # Verify binaries are in place
+      - run: |
+          ls -lh packages/darwin-arm64/island-host-bin
+          ls -lh packages/darwin-x64/island-host-bin
+          ls -lh packages/win32-x64/island-host-win.exe
+
+      # Determine npm tag: beta tags publish to "beta", others to "latest"
+      - id: npm-tag
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" == *"beta"* ]]; then
+            echo "tag=beta" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *"alpha"* ]]; then
+            echo "tag=alpha" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Publish platform packages first, then the main package.
+      # --access public is required for scoped packages (@pi-island/*).
+      # --tag ensures beta versions don't become the default install.
+      - run: |
+          echo "Publishing with npm tag: ${{ steps.npm-tag.outputs.tag }}"
+
+          cd packages/darwin-arm64
+          npm publish --access public --tag ${{ steps.npm-tag.outputs.tag }}
+          cd ../..
+
+          cd packages/darwin-x64
+          npm publish --access public --tag ${{ steps.npm-tag.outputs.tag }}
+          cd ../..
+
+          cd packages/win32-x64
+          npm publish --access public --tag ${{ steps.npm-tag.outputs.tag }}
+          cd ../..
+
+          npm publish --access public --tag ${{ steps.npm-tag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -540,7 +540,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             timer.schedule(deadline: .now(), repeating: .milliseconds(8))
             timer.setEventHandler { [weak self] in
                 MainActor.assumeIsolated {
-                    self?.springPhysicsStep()
+                    guard let s = self else { return }
+                    s.springPhysicsStep()
                 }
             }
             springTimer = timer
@@ -633,16 +634,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
                     log("Skipping invalid JSON: \(trimmed)")
                     continue
                 }
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [weak self] in
                     MainActor.assumeIsolated {
-                        self?.handleCommand(type: type, json: json)
+                        guard let s = self else { return }
+                        s.handleCommand(type: type, json: json)
                     }
                 }
             }
             // stdin EOF — close window
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 MainActor.assumeIsolated {
-                    self?.closeAndExit()
+                    guard let s = self else { return }
+                    s.closeAndExit()
                 }
             }
         }

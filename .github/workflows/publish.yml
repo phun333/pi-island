@@ -19,10 +19,10 @@ jobs:
           path: island-host-bin
 
   build-darwin-x64:
-    runs-on: macos-13    # Intel runner
+    runs-on: macos-14    # Cross-compile x64 from ARM runner (macos-13 Intel runners are deprecated/slow)
     steps:
       - uses: actions/checkout@v4
-      - run: swiftc -O hosts/macos/island-host.swift -o island-host-bin
+      - run: swiftc -O -target x86_64-apple-macosx10.15 hosts/macos/island-host.swift -o island-host-bin
       - uses: actions/upload-artifact@v4
         with:
           name: darwin-x64

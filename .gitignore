@@ -6,10 +6,16 @@ yarn-error.log*
 pnpm-debug.log*
 .npm/
 
-# Build artifacts — the native host binary is compiled per-machine on
-# install via scripts/postinstall.mjs. Never commit it.
+# Build artifacts — native host binaries are compiled per-machine (dev)
+# or pulled from platform packages (install). Never commit them.
 pi-extension/island-host-bin
+pi-extension/island-host.exe
 .build-skipped
+
+# Platform package binaries — built by CI, not committed
+packages/darwin-arm64/island-host-bin
+packages/darwin-x64/island-host-bin
+packages/win32-x64/island-host-win.exe
 
 # ─── Environment / secrets ──────────────────────────────────────────────
 .env
@@ -48,6 +54,9 @@ logs/
 *.pid
 *.seed
 *.pid.lock
+
+# ─── Local-only docs (not pushed) ───────────────────────────────────
+docs/CROSS-PLATFORM.md
 
 # ─── pi session exports (local dev artifacts) ───────────────────────────
 pi-session-*.html

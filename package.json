@@ -46,6 +46,11 @@
     "README.md",
     "LICENSE"
   ],
+  "optionalDependencies": {
+    "@pi-island/darwin-arm64": "0.2.1",
+    "@pi-island/darwin-x64": "0.2.1",
+    "@pi-island/win32-x64": "0.2.1"
+  },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*"

@@ -1,0 +1,19 @@
+{
+  "name": "@pi-island/darwin-arm64",
+  "version": "0.2.1",
+  "description": "pi-island native host binary for macOS ARM64 (Apple Silicon)",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "island-host-bin"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phun333/pi-island.git"
+  }
+}

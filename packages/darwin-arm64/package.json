@@ -1,6 +1,6 @@
 {
   "name": "@pi-island/darwin-arm64",
-  "version": "0.3.0-beta.3",
+  "version": "0.3.0-beta.4",
   "description": "pi-island native host binary for macOS ARM64 (Apple Silicon)",
   "os": [
     "darwin"

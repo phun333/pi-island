@@ -16,6 +16,9 @@ pi-extension/island-host.exe
 packages/darwin-arm64/island-host-bin
 packages/darwin-x64/island-host-bin
 packages/win32-x64/island-host-win.exe
+hosts/windows/bin/
+hosts/windows/obj/
+hosts/windows/out/
 
 # ─── Environment / secrets ──────────────────────────────────────────────
 .env

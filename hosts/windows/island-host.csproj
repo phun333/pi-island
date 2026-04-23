@@ -6,11 +6,13 @@
     <RootNamespace>PiIsland</RootNamespace>
     <AssemblyName>island-host-win</AssemblyName>
     <!-- Self-contained bundles the .NET runtime so end users don't need
-         to install anything. PublishTrimmed strips unused code to keep
-         the binary reasonable (~20-30 MB instead of ~60 MB). -->
+         to install anything. WPF does not support PublishTrimmed, so the
+         binary is ~50-60 MB. PublishSingleFile packs everything into one
+         .exe for clean distribution. -->
     <SelfContained>true</SelfContained>
-    <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>link</TrimMode>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
     <!-- WebView2 control for WPF. The actual WebView2 Runtime is pre-installed

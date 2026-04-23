@@ -39,6 +39,7 @@
     "pi-extension/open-fixed.mjs",
     "pi-extension/companion.mjs",
     "pi-extension/socket-path.mjs",
+    "pi-extension/platform.mjs",
     "pi-extension/island-host.swift",
     "pi-extension/demo.mjs",
     "scripts/build.mjs",

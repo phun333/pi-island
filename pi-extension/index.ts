@@ -134,18 +134,17 @@ function writePreference(p: Preference): void {
   } catch { /* best-effort — don't crash the session over a cache file */ }
 }
 
-// Query macOS for the number of attached displays. Used to build the
-// Screen dropdown in the settings menu; capped at something sane so a
-// weird system with 20 fake displays doesn't produce a 20-entry menu.
-function getScreenCount(): number {
+// Screen count — delegated to platform.mjs so it works on macOS and Windows.
+// Dynamic import because index.ts is the extension entry point and
+// platform.mjs is an .mjs file (pure ESM).
+let _platformGetScreenCount: (() => number) | null = null;
+async function getScreenCount(): Promise<number> {
   try {
-    const out = execSync(
-      `osascript -l JavaScript -e "ObjC.import('AppKit'); $.NSScreen.screens.js.length"`,
-      { encoding: "utf8", timeout: 1500 },
-    ).trim();
-    const n = parseInt(out, 10);
-    if (!Number.isFinite(n) || n < 1) return 1;
-    return Math.min(n, 9);
+    if (!_platformGetScreenCount) {
+      const mod = await import("./platform.mjs");
+      _platformGetScreenCount = mod.getScreenCount;
+    }
+    return _platformGetScreenCount();
   } catch { return 1; }
 }
 
@@ -190,7 +189,7 @@ function truncateProject(s: string, max = 20): string {
 
 // ── extension entry ────────────────────────────────────────────────────────
 export default function (pi: ExtensionAPI) {
-  if (process.platform !== "darwin") return; // mac-only by design
+  if (process.platform !== "darwin" && process.platform !== "win32") return;
 
   // ── Client state ─────────────────────────────────────────────────────────
   let sock: Socket | null = null;
@@ -304,12 +303,22 @@ export default function (pi: ExtensionAPI) {
       sock = null;
     }
     try {
-      execSync("pkill -f pi-island/pi-extension/companion.mjs", {
-        timeout: 1000,
-        stdio: "ignore",
-      });
+      if (process.platform === "win32") {
+        execSync('taskkill /F /FI "COMMANDLINE eq *pi-island*companion.mjs*"', {
+          timeout: 1000,
+          stdio: "ignore",
+        });
+      } else {
+        execSync("pkill -f pi-island/pi-extension/companion.mjs", {
+          timeout: 1000,
+          stdio: "ignore",
+        });
+      }
     } catch { /* no matching process */ }
-    try { if (existsSync(SOCK)) unlinkSync(SOCK); } catch {}
+    // Unix sockets leave a file on disk; named pipes (Windows) auto-clean.
+    if (process.platform !== "win32") {
+      try { if (existsSync(SOCK)) unlinkSync(SOCK); } catch {}
+    }
     await new Promise((r) => setTimeout(r, 300));
   }
 
@@ -511,7 +520,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const screenCount = getScreenCount();
+    const screenCount = await getScreenCount();
     const screenValues: string[] = ["primary", "active"];
     for (let i = 2; i <= screenCount; i++) screenValues.push(String(i));
 

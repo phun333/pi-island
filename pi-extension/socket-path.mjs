@@ -1,12 +1,22 @@
-// Unix socket path shared by the companion process and all pi extension
-// clients. One socket per user; lives under ~/.pi/ which is already
-// user-scoped so there's no permission conflict.
+// IPC path shared by the companion process and all pi extension clients.
+//
+// macOS / Linux: Unix domain socket at ~/.pi/pi-island.sock
+// Windows:       Named pipe at \\.\pipe\pi-island
+//
+// Node.js net module handles both transparently — callers just use SOCK
+// with net.connect() / net.createServer() and never branch on platform.
 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 
-const dir = join(homedir(), ".pi");
-try { mkdirSync(dir, { recursive: true }); } catch { /* already exists */ }
+if (process.platform !== "win32") {
+  // Unix sockets live on the filesystem — ensure the directory exists.
+  // Named pipes on Windows are kernel objects; no directory needed.
+  const dir = join(homedir(), ".pi");
+  try { mkdirSync(dir, { recursive: true }); } catch { /* already exists */ }
+}
 
-export const SOCK = join(dir, "pi-island.sock");
+export const SOCK = process.platform === "win32"
+  ? "\\\\.\\pipe\\pi-island"
+  : join(homedir(), ".pi", "pi-island.sock");

@@ -103,7 +103,7 @@ function getScreenGeometry_win32(screenPref) {
 
     const out = execSync(
       `powershell -NoProfile -NoLogo -Command "${script.replace(/"/g, '\\"')}"`,
-      { encoding: "utf8", timeout: 2000 },
+      { encoding: "utf8", timeout: 2000, windowsHide: true },
     ).trim();
     const j = JSON.parse(out);
     if (Number.isFinite(j.w) && Number.isFinite(j.h)) {
@@ -161,7 +161,7 @@ export function getScreenCount() {
     if (process.platform === "win32") {
       const out = execSync(
         `powershell -NoProfile -NoLogo -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens.Length"`,
-        { encoding: "utf8", timeout: 2000 },
+        { encoding: "utf8", timeout: 2000, windowsHide: true },
       ).trim();
       const n = parseInt(out, 10);
       if (Number.isFinite(n) && n >= 1) return Math.min(n, 9);

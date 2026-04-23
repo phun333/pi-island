@@ -138,6 +138,16 @@ class IslandWindow : Window
         IntPtr hwnd, IntPtr hwndInsertAfter,
         int x, int y, int cx, int cy, uint uFlags);
 
+    [DllImport("user32.dll")]
+    static extern bool SetLayeredWindowAttributes(
+        IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
+
+    const uint LWA_ALPHA = 0x02;
+
+
+
+
+
     // ── Bridge JS ──────────────────────────────────────────────────────────
     // Same API surface as the Swift host's window.islandHost, but uses
     // WebView2's chrome.webview.postMessage instead of webkit messageHandlers.
@@ -171,7 +181,10 @@ class IslandWindow : Window
         if (config.Frameless)
             WindowStyle = WindowStyle.None;
 
-        // Transparent background (must be set before window shows)
+        // Transparent background via WPF layered window. WebView2's GPU
+        // renderer crashes with layered windows, so we disable GPU in the
+        // WebView2 environment options (see OnLoaded). Software rendering
+        // is fine for a tiny status capsule.
         if (config.Transparent)
         {
             AllowsTransparency = true;
@@ -213,9 +226,11 @@ class IslandWindow : Window
         var hwnd = new WindowInteropHelper(this).Handle;
         var exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
 
-        // Click-through: mouse events pass to windows below
+        // Click-through: AllowsTransparency already sets WS_EX_LAYERED.
+        // WS_EX_TRANSPARENT makes the layered window pass-through for
+        // mouse hit-testing.
         if (_config.ClickThrough)
-            exStyle |= WS_EX_TRANSPARENT | WS_EX_LAYERED;
+            exStyle |= WS_EX_TRANSPARENT;
 
         // Tool window: no taskbar entry, no Alt+Tab
         if (_config.NoDock)
@@ -262,7 +277,15 @@ class IslandWindow : Window
             var userDataFolder = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "pi-island", "webview2");
-            var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder);
+            var options = new CoreWebView2EnvironmentOptions();
+            // Fallback: if DWM transparency still causes GPU issues, disable
+            // GPU compositing. This uses software rendering (slightly slower
+            // but compatible with all transparency modes).
+            // Disable GPU — WebView2's GPU renderer crashes with WPF
+            // layered windows (AllowsTransparency=true). Software rendering
+            // is fine for a tiny status capsule.
+            options.AdditionalBrowserArguments = "--disable-gpu";
+            var env = await CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
             await _webView.EnsureCoreWebView2Async(env);
         }
         catch (Exception ex)
@@ -353,8 +376,15 @@ class IslandWindow : Window
             }
             catch { /* stdin closed or broken pipe */ }
 
-            // stdin EOF — companion died or closed the pipe
-            Dispatcher.Invoke(CloseAndExit);
+            // stdin EOF — companion died or closed the pipe.
+            // Force exit aggressively — Dispatcher.Invoke can deadlock
+            // if the UI thread is stuck. Belt and braces: try polite
+            // first, then force-kill after 1 second.
+            try { Dispatcher.Invoke(CloseAndExit); }
+            catch { /* Dispatcher dead or window gone */ }
+            // If we're still alive, force exit from this thread.
+            Thread.Sleep(1000);
+            Environment.Exit(0);
         })
         {
             IsBackground = true,
@@ -431,9 +461,16 @@ class IslandWindow : Window
         Environment.Exit(0);
     }
 
+    private static int _exiting;
+
     private void CloseAndExit()
     {
-        Stdout.Write(new JsonObject { ["type"] = "closed" });
+        // Guard against double-exit (stdin EOF + window close race)
+        if (Interlocked.Exchange(ref _exiting, 1) == 1) return;
+        try { Stdout.Write(new JsonObject { ["type"] = "closed" }); } catch { }
+        // Environment.Exit is the nuclear option — kills all threads,
+        // releases all handles. Needed because WPF's Application.Shutdown
+        // can hang if WebView2 is mid-navigation.
         Environment.Exit(0);
     }
 }

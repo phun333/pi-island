@@ -307,11 +307,13 @@ export default function (pi: ExtensionAPI) {
         execSync('taskkill /F /FI "COMMANDLINE eq *pi-island*companion.mjs*"', {
           timeout: 1000,
           stdio: "ignore",
+          windowsHide: true,
         });
       } else {
         execSync("pkill -f pi-island/pi-extension/companion.mjs", {
           timeout: 1000,
           stdio: "ignore",
+          windowsHide: true,
         });
       }
     } catch { /* no matching process */ }
@@ -353,6 +355,7 @@ export default function (pi: ExtensionAPI) {
       const child = spawn(process.execPath, [COMPANION], {
         detached: true,
         stdio: "ignore",
+        windowsHide: true,
       });
       child.unref();
 

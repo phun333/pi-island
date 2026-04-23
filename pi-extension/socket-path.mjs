@@ -17,6 +17,8 @@ if (process.platform !== "win32") {
   try { mkdirSync(dir, { recursive: true }); } catch { /* already exists */ }
 }
 
+// Node.js on Windows needs forward-slash named pipe paths (//./pipe/name).
+// The backslash form (\\.\pipe\name) causes EACCES in some environments.
 export const SOCK = process.platform === "win32"
-  ? "\\\\.\\pipe\\pi-island"
+  ? "//./pipe/pi-island"
   : join(homedir(), ".pi", "pi-island.sock");

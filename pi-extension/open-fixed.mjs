@@ -111,6 +111,9 @@ export function openFixed(html, options = {}) {
   if (options.x != null) args.push("--x", String(options.x));
   if (options.y != null) args.push("--y", String(options.y));
 
-  const proc = spawn(bin, args, { stdio: ["pipe", "pipe", "inherit"] });
+  // stderr: "inherit" on macOS (useful for Swift logs), "ignore" on Windows
+  // (WebView2 spams harmless GPU errors that would flash a console).
+  const stderr = process.platform === "win32" ? "ignore" : "inherit";
+  const proc = spawn(bin, args, { stdio: ["pipe", "pipe", stderr], windowsHide: true });
   return new FixedWindow(proc, html);
 }

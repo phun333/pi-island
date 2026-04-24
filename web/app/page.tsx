@@ -49,7 +49,8 @@ export default function Home() {
             >
               pi coding agent
             </a>
-            . Native WKWebView, notch-aware, one row per session — pinned,
+            . Native on macOS (WKWebView) and Windows (WebView2),
+            notch-aware on MacBooks, one row per session — pinned,
             stacked, and always in sight.
           </p>
 
@@ -64,12 +65,12 @@ export default function Home() {
           <div className="flex items-end justify-between gap-4 border-b border-[color:var(--border)] pb-2 mb-5">
             <h2 className="font-sans font-semibold text-[17px] tracking-tight">Install</h2>
             <span className="text-[10px] text-[color:var(--foreground-dim)] uppercase tracking-wider">
-              macOS only
+              macOS / Windows
             </span>
           </div>
 
           <p className="text-[14px] text-[color:var(--foreground-dim)] leading-relaxed mb-4">
-            Requires <strong className="text-[color:var(--foreground)]">macOS</strong>,{" "}
+            Requires{" "}
             <a
               href="https://pi.dev"
               className="text-[color:var(--link)] hover:text-[color:var(--link-hover)]"
@@ -77,14 +78,20 @@ export default function Home() {
               rel="noreferrer"
             >
               pi
-            </a>
-            , and Xcode Command Line Tools.
+            </a>{" "}
+            plus the toolchain for your platform — Xcode Command Line
+            Tools on <strong className="text-[color:var(--foreground)]">macOS</strong>,
+            the .NET 8 SDK on <strong className="text-[color:var(--foreground)]">Windows</strong>.
           </p>
 
           <div className="space-y-2 font-mono text-[13px]">
             <div className="rounded-lg bg-[color:var(--background-muted)] border border-[color:var(--border)] px-4 py-2.5 text-[color:var(--foreground)]">
-              <span className="text-[color:var(--foreground-dim)] select-none">$ </span>
+              <span className="text-[color:var(--foreground-dim)] select-none">macOS $ </span>
               xcode-select --install
+            </div>
+            <div className="rounded-lg bg-[color:var(--background-muted)] border border-[color:var(--border)] px-4 py-2.5 text-[color:var(--foreground)]">
+              <span className="text-[color:var(--foreground-dim)] select-none">Windows &gt; </span>
+              winget install Microsoft.DotNet.SDK.8
             </div>
             <div className="rounded-lg bg-[color:var(--background-muted)] border border-[color:var(--border)] px-4 py-2.5 text-[color:var(--foreground)]">
               <span className="text-[color:var(--foreground-dim)] select-none">$ </span>
@@ -149,11 +156,11 @@ export default function Home() {
           </div>
 
           <ol className="space-y-3.5">
-            <Step num={1} bold="A native Swift host" rest="renders a borderless, click-through WKWebView pinned above every Space and full-screen app." />
-            <Step num={2} bold="pi's extension API" rest="streams each turn's status over a Unix domain socket to the host." />
+            <Step num={1} bold="A native host per platform" rest="renders a borderless, click-through WebView pinned above every window — Swift + WKWebView on macOS, C# + WebView2 on Windows." />
+            <Step num={2} bold="pi's extension API" rest="streams each turn's status over a local socket to the host." />
             <Step num={3} bold="Every pi session" rest="gets its own row. Rows stack into a single capsule, sized to the longest row." />
             <Step num={4} bold="Notch detection" rest="on MacBooks with a notch, the capsule splits to wrap around it automatically — or force it on/off from the settings menu." />
-            <Step num={5} bold="Zero chrome." rest="No dock icon, no Stage Manager clutter — it just lives at the top." />
+            <Step num={5} bold="Zero chrome." rest="No dock icon, no taskbar entry, no Stage Manager clutter — it just lives at the top." />
           </ol>
 
         </section>

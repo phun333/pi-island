@@ -40,7 +40,7 @@ async function getClient() {
     if (s) return s;
   }
   const child = spawn(process.execPath, [COMPANION], {
-    detached: true, stdio: "ignore",
+    detached: true, stdio: "ignore", windowsHide: true,
   });
   child.unref();
   for (let i = 0; i < 30; i++) {

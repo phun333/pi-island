@@ -1,8 +1,12 @@
 # pi-island
 
-A macOS Dynamic-Island-style status capsule for the
+A Dynamic-Island-style status capsule for the
 [pi coding agent](https://github.com/badlogic/pi-mono).
-Pinned at the top of your screen, live on every turn.
+Pinned at the top of your screen on **macOS** and **Windows**,
+live on every turn.
+
+> On macOS the capsule wraps the MacBook notch natively. On Windows
+> it pins to the top-center of the active display.
 
 <video src="https://github.com/user-attachments/assets/db5cd9a6-d949-4094-800e-e7aa36c143a3" controls muted autoplay playsinline width="640"></video>
 
@@ -10,12 +14,22 @@ Pinned at the top of your screen, live on every turn.
 
 ## Install
 
-Requires **macOS** + **pi** + Xcode Command Line Tools
-(`xcode-select --install`).
+Supported on **macOS** and **Windows**. You need **pi** plus the
+toolchain for your platform:
+
+- **macOS** — Xcode Command Line Tools (`xcode-select --install`)
+- **Windows** — .NET 8 SDK (`winget install Microsoft.DotNet.SDK.8`)
+
+Then:
 
 ```bash
 pi install npm:pi-island
 ```
+
+The postinstall step compiles the native host for your platform
+(Swift on macOS, C# / WebView2 on Windows). If the required toolchain
+is missing, the install still succeeds — the extension just no-ops
+until you install it and run `npm run build`.
 
 The island turns on automatically for every pi session after install.
 Type `/island` any time to tweak it.
@@ -35,7 +49,7 @@ A drop-down opens with four rows. Cycle each value with Enter or Space:
 | Visibility    | `enabled` / `disabled`              | Remember the choice across restarts.           |
 | Size          | `small` / `medium` / `large` / `xlarge` | Live — no respawn.                         |
 | Screen        | `primary` / `active` / `2` / `3` …  | `primary` = menu-bar display, `active` = under mouse, numbers for multi-monitor. |
-| Notch wrap    | `auto` / `normal` / `notch`         | `auto` detects. Forcing off/on also supported. |
+| Notch wrap    | `auto` / `normal` / `notch`         | macOS only. `auto` detects; forcing off/on also supported. On Windows this row is inert. |
 
 Your choices are persisted in `~/.pi/pi-island.json` and survive
 every pi restart.

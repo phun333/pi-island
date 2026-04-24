@@ -37,13 +37,13 @@
 import { createServer } from "node:net";
 import { createInterface } from "node:readline";
 import { existsSync, readFileSync, unlinkSync } from "node:fs";
-import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openFixed } from "./open-fixed.mjs";
 import { buildIslandHTML } from "./island.html.mjs";
 import { SOCK } from "./socket-path.mjs";
+import { getScreenGeometry, computeWindowPosition, resolveNotchMode } from "./platform.mjs";
 
 // ---- Version handshake ----------------------------------------------------
 // Used by the client so it can notice a version mismatch (e.g. user ran
@@ -84,72 +84,6 @@ function readPref() {
   } catch { return {}; }
 }
 
-// ---- Screen geometry ------------------------------------------------------
-// Pick the target NSScreen based on the user preference:
-//
-//   "primary"  → NSScreen.screens[0]  (menu-bar screen, AGENT.md §6.1 original)
-//   "active"   → screen under the mouse cursor at spawn (multi-monitor follow)
-//   "N" (1..)  → specific display index (1 == screens[0] == primary)
-//
-// Any unknown / missing value falls back to primary. We still return the
-// screen's *global* origin so the caller can place the window in global
-// coordinate space (Cocoa uses bottom-left) on multi-monitor setups.
-function buildScreenSelectorJXA(screenPref) {
-  if (screenPref === "active") {
-    return (
-      "const mouse = $.NSEvent.mouseLocation;" +
-      "const all = $.NSScreen.screens.js;" +
-      "for (const scr of all) {" +
-      "  const f = scr.frame;" +
-      "  if (mouse.x >= f.origin.x && mouse.x < f.origin.x + f.size.width &&" +
-      "      mouse.y >= f.origin.y && mouse.y < f.origin.y + f.size.height) {" +
-      "    s = scr; break;" +
-      "  }" +
-      "}" +
-      "if (!s) s = $.NSScreen.mainScreen;"
-    );
-  }
-  const idx = parseInt(screenPref, 10);
-  if (Number.isFinite(idx) && idx >= 1) {
-    // Clamp to available screens inside the JXA runtime so out-of-range
-    // indices don't explode — fall back to screens[0].
-    return (
-      "const all = $.NSScreen.screens.js;" +
-      `s = all[${idx - 1}] || all[0];`
-    );
-  }
-  // "primary" or anything unknown.
-  return "s = $.NSScreen.screens.js[0];";
-}
-
-function getScreenGeometry(screenPref) {
-  try {
-    const script =
-      "ObjC.import('AppKit');" +
-      "let s = null;" +
-      buildScreenSelectorJXA(screenPref) +
-      "if (!s || !s.frame) s = $.NSScreen.screens.js[0];" +
-      "const f = s.frame;" +
-      "const sa = (s.safeAreaInsets && s.safeAreaInsets.top) || 0;" +
-      "JSON.stringify({x: f.origin.x, y: f.origin.y, w: f.size.width, h: f.size.height, notch: sa})";
-    const out = execSync(`osascript -l JavaScript -e ${JSON.stringify(script)}`, {
-      encoding: "utf8",
-      timeout: 1500,
-    }).trim();
-    const j = JSON.parse(out);
-    if (Number.isFinite(j.w) && Number.isFinite(j.h)) {
-      return {
-        x:      Math.round(j.x || 0),
-        y:      Math.round(j.y || 0),
-        width:  Math.round(j.w),
-        height: Math.round(j.h),
-        notch:  Math.round(j.notch || 0),
-      };
-    }
-  } catch { /* fall through */ }
-  return { x: 0, y: 0, width: 1440, height: 900, notch: 0 };
-}
-
 // ---- Window setup ---------------------------------------------------------
 // Tall enough to fit several stacked rows without ever needing a resize
 // (the host window can't be resized after spawn). The extra vertical area
@@ -169,27 +103,9 @@ const NOTCH_PREF =
     ? _pref.notchMode
     : "auto";
 
-const {
-  x: screenX,
-  y: screenY,
-  width:  screenW,
-  height: screenH,
-  notch:  notchH,
-} = getScreenGeometry(SCREEN_PREF);
-
-// Place the window top-center of the chosen screen, in the global
-// coordinate space (macOS uses bottom-left origin; larger y = further up).
-const x = Math.round(screenX + (screenW - WIN_W) / 2);
-const y = Math.round(screenY + screenH - WIN_H);
-
-// Resolve the notch policy:
-//   "normal"  → force off regardless of detection
-//   "notch"   → force on regardless of detection
-//   anything else ("auto") → use the detected value
-const autoMode =
-  NOTCH_PREF === "normal" ? "normal" :
-  NOTCH_PREF === "notch"  ? "notch"  :
-  (notchH > 0 ? "notch" : "normal");
+const screenGeo = getScreenGeometry(SCREEN_PREF);
+const { x, y } = computeWindowPosition(screenGeo, WIN_W, WIN_H);
+const autoMode = resolveNotchMode(NOTCH_PREF, screenGeo.notch);
 
 const win = openFixed(buildIslandHTML(), {
   width: WIN_W, height: WIN_H, x, y,
@@ -213,7 +129,10 @@ win.on("closed", () => { cleanup(); process.exit(0); });
 win.on("error", () => { /* keep running; the host may emit harmless errors */ });
 
 // ---- Socket server --------------------------------------------------------
-if (existsSync(SOCK)) {
+// Unix sockets leave a file on disk that must be cleaned up before
+// re-listening. Named pipes (Windows) are kernel objects — no cleanup
+// needed, and unlinkSync would throw on a pipe path anyway.
+if (process.platform !== "win32" && existsSync(SOCK)) {
   try { unlinkSync(SOCK); } catch {}
 }
 
@@ -339,7 +258,7 @@ function cleanup() {
   if (cleaned) return;
   cleaned = true;
   try { server.close(); } catch {}
-  try { if (existsSync(SOCK)) unlinkSync(SOCK); } catch {}
+  if (process.platform !== "win32") { try { if (existsSync(SOCK)) unlinkSync(SOCK); } catch {} }
   try { win.close(); } catch {}
 }
 process.on("SIGTERM", () => { cleanup(); process.exit(0); });

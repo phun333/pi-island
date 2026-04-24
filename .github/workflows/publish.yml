@@ -1,6 +1,6 @@
 name: Publish to npm
 
-# Runs when you push a version tag like v0.1.0, v1.2.3, etc.
+# Triggered on version tags: v0.3.0, v0.3.0-beta.1, etc.
 on:
   push:
     tags:
@@ -8,19 +8,33 @@ on:
 
 jobs:
   publish:
-    runs-on: macos-latest   # need macOS so postinstall can compile the Swift host
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      # Install deps + compile island-host-bin via postinstall
+      # Compile the macOS host binary (postinstall does this normally,
+      # but CI verifies the Swift source compiles cleanly).
       - run: npm install
 
-      # Publish to npm (public access — required for scoped packages).
-      - run: npm publish --access public
+      # Determine npm tag: beta/alpha tags publish to their own channel,
+      # everything else goes to "latest".
+      - id: npm-tag
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" == *"beta"* ]]; then
+            echo "tag=beta" >> "$GITHUB_OUTPUT"
+          elif [[ "$TAG" == *"alpha"* ]]; then
+            echo "tag=alpha" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: |
+          echo "Publishing with npm tag: ${{ steps.npm-tag.outputs.tag }}"
+          npm publish --access public --tag ${{ steps.npm-tag.outputs.tag }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

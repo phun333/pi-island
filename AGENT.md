@@ -35,53 +35,71 @@ pi-island/
 ├── AGENT.md                  ← you are here
 ├── README.md                 ← user-facing docs
 ├── LICENSE                   ← MIT (© phun333)
-├── package.json              ← npm + pi extension manifest
+├── package.json              ← npm + pi extension manifest + optionalDependencies
 ├── .github/
 │   └── workflows/
-│       └── publish.yml       ← auto npm publish on `v*` tag push
+│       └── publish.yml       ← build 3 platform binaries + publish 4 npm packages
+├── packages/                 ← platform-specific npm packages (binary only)
+│   ├── darwin-arm64/         ← @pi-island/darwin-arm64
+│   ├── darwin-x64/           ← @pi-island/darwin-x64
+│   └── win32-x64/            ← @pi-island/win32-x64
+├── hosts/                    ← native host source code (one per platform)
+│   ├── macos/
+│   │   └── island-host.swift ← Cocoa + WKWebView (statusBar level + constrainFrameRect)
+│   └── windows/
+│       ├── island-host.cs    ← WPF + WebView2 (AllowsTransparency + --disable-gpu)
+│       └── island-host.csproj
 ├── scripts/
-│   ├── build.mjs             ← swiftc island-host.swift → island-host-bin
-│   └── postinstall.mjs       ← runs build.mjs on install (darwin only)
+│   ├── build.mjs             ← platform routing: swiftc (macOS) / dotnet (Windows)
+│   ├── postinstall.mjs       ← resolve binary from platform pkg OR fallback build
+│   └── bump-version.mjs      ← sync versions across all 4 packages
 └── pi-extension/
     ├── index.ts              ← pi extension: event wiring + /island commands
     ├── companion.mjs         ← long-lived daemon that owns the WebView
-    ├── island.html.mjs       ← HTML/CSS/JS inside the WebView
-    ├── open-fixed.mjs        ← native host spawn wrapper (--x/--y Cocoa fix)
-    ├── socket-path.mjs       ← ~/.pi/pi-island.sock helper
+    ├── island.html.mjs       ← HTML/CSS/JS inside the WebView (platform-agnostic)
+    ├── open-fixed.mjs        ← host spawn wrapper (platform binary routing)
+    ├── platform.mjs          ← screen geometry, coordinates, notch (per-platform)
+    ├── socket-path.mjs       ← Unix socket (macOS) / named pipe (Windows)
     ├── demo.mjs              ← visual demo, no pi required
-    ├── island-host.swift     ← Swift source for the native WebView host
-    └── island-host-bin       ← compiled binary (produced on install)
+    ├── island-host.swift     ← Swift source (kept for npm tarball backward compat)
+    ├── island-host-bin       ← macOS binary (built on install or from platform pkg)
+    └── island-host-win.exe   ← Windows binary (built on install or from platform pkg)
 ```
 
 **Build artifacts (never commit):**
-- `pi-extension/island-host-bin` — architecture-specific Mach-O, built
-  per-machine by `scripts/postinstall.mjs`.
-- `.build-skipped` — marker file written when `swiftc` is missing so we
-  don't fail install; the extension then no-ops until `npm run build`.
+- `pi-extension/island-host-bin` — macOS Mach-O binary.
+- `pi-extension/island-host-win.exe` — Windows PE binary.
+- `hosts/windows/bin/`, `hosts/windows/obj/`, `hosts/windows/out/` — .NET build intermediates.
+- `packages/*/island-host-*` — CI-built binaries for platform packages.
+- `.build-skipped` — marker file written when compiler is missing.
 
 **Not ours, leave alone:**
-- `~/.pi/companion.json` — belongs to pi itself, unrelated to our
-  companion daemon.
+- `~/.pi/companion.json` — belongs to pi itself.
 - `~/.pi/agent/` — pi's own state.
 
-Our own runtime state lives **only** at `~/.pi/pi-island.sock`.
+Our own runtime state lives at:
+- macOS: `~/.pi/pi-island.sock` (Unix domain socket)
+- Windows: `//./pipe/pi-island` (named pipe)
 
 ---
 
 ## 3. Architecture at a glance
 
 ```
-┌──────────────────┐   unix socket   ┌──────────────────┐   stdin JSONL   ┌──────────────────┐
-│  pi (session A)  │ ──────────────▶ │                  │ ──────────────▶ │  island-host     │
-│  pi-extension    │                 │  companion.mjs   │                 │  (Swift + WKWeb) │
-│  index.ts        │ ──────────────▶ │  one per user    │ ◀────────────── │  island.html     │
-│  pi (session B)  │   ~/.pi/sock    │                  │   stdout JSONL  │                  │
-└──────────────────┘                 └──────────────────┘                 └──────────────────┘
+┌──────────────────┐   IPC (socket/pipe)  ┌──────────────────┐   stdin JSONL   ┌──────────────────┐
+│  pi (session A)  │ ─────────────────▶ │                  │ ──────────────▶ │  island-host     │
+│  pi-extension    │                    │  companion.mjs   │                 │  macOS: Swift    │
+│  index.ts        │ ─────────────────▶ │  one per user    │ ◀────────────── │  Windows: C#     │
+│  pi (session B)  │                    │                  │   stdout JSONL  │  island.html     │
+└──────────────────┘                    └──────────────────┘                 └──────────────────┘
+
+macOS IPC:   ~/.pi/pi-island.sock (Unix domain socket)
+Windows IPC: //./pipe/pi-island   (named pipe)
 ```
 
 Three processes, three protocols:
-1. **pi-extension ↔ companion** — Unix socket, line-delimited JSON
-   (see §5: socket contract).
+1. **pi-extension ↔ companion** — Unix socket (macOS) / named pipe (Windows),
+   line-delimited JSON (see §5: socket contract).
 2. **companion ↔ island-host** — stdin/stdout line-delimited JSON, via
    `open-fixed.mjs` (see §7: host binary protocol).
 3. **companion → WebView JS** — `win.send(js)` calls `evaluateJavaScript`
@@ -406,14 +424,77 @@ can also set `--scale` inline on a single row via `rowScale` for the
 | Prompt truncation     | 48 chars       | `truncatePrompt()` in `index.ts`.                           |
 | Project truncation    | 20 chars       | `truncateProject()` in `index.ts` (source-side guard; CSS ellipsis adds a second safety net). |
 
+### 6.9. Windows host — design decisions (v0.3.0+)
+
+The Windows host (`island-host-win.exe`) is a C# WPF + WebView2 app
+that speaks the **same** stdin/stdout JSON protocol as the Swift host.
+Key implementation decisions:
+
+**AllowsTransparency + --disable-gpu:** WPF `AllowsTransparency=true`
+creates a layered window (required for per-pixel transparency and
+click-through). WebView2's GPU renderer crashes with layered windows
+(`STATUS_ACCESS_VIOLATION`). Fix: pass `--disable-gpu` via
+`CoreWebView2EnvironmentOptions.AdditionalBrowserArguments`. Software
+rendering is fine for a tiny status capsule.
+
+**Click-through:** `WS_EX_TRANSPARENT` on a layered window makes it
+invisible to mouse hit-testing. No `WS_EX_LAYERED` needed because
+`AllowsTransparency` already sets it.
+
+**No taskbar / Alt+Tab:** `WS_EX_TOOLWINDOW` + `ShowInTaskbar=false`.
+
+**Always on top:** `Topmost=true` (WPF) + `SetWindowPos(HWND_TOPMOST)`
+(Win32 belt-and-braces).
+
+**Physical pixel positioning:** `SetWindowPos` in `OnSourceInitialized`
+bypasses WPF DPI scaling. The companion sends physical pixel coords
+via `--x` / `--y` argv.
+
+**Named pipe path:** Must be `//./pipe/pi-island` (forward slashes).
+The backslash form `\\.\pipe\pi-island` causes `EACCES` in Node.js
+on some Windows environments. Node.js `net` module handles both forms
+but forward slashes are safer.
+
+**Process exit:** `Environment.Exit(0)` with `Interlocked` guard
+against double-exit. Stdin EOF triggers aggressive exit (try
+Dispatcher.Invoke, then force-kill after 1s timeout).
+
+**windowsHide:** All `spawn()` and `execSync()` calls in the JS layer
+use `windowsHide: true` to prevent CMD window flash.
+
+**WebView2 user data:** Stored in `%LOCALAPPDATA%/pi-island/webview2/`
+to avoid colliding with other WebView2 apps.
+
+### 6.10. Binary distribution (v0.3.0+)
+
+Pre-built host binaries ship as platform-specific npm packages under
+the `@pi-island` org (free public). npm `optionalDependencies` with
+`os` + `cpu` fields ensure only the matching binary is downloaded.
+
+| Package | Platform | Binary |
+|---------|----------|--------|
+| `@pi-island/darwin-arm64` | macOS Apple Silicon | `island-host-bin` (~2 MB) |
+| `@pi-island/darwin-x64` | macOS Intel | `island-host-bin` (~2 MB) |
+| `@pi-island/win32-x64` | Windows x64 | `island-host-win.exe` (~69 MB) |
+
+The Windows binary is large because it bundles the .NET 8 runtime
+(self-contained, `PublishSingleFile`). WPF does not support trimming.
+End users install nothing — the binary runs standalone.
+
+### 6.11. Beta releases (v0.3.0+)
+
+`npm publish --tag beta` keeps pre-release versions off the default
+install. Users get beta only via `npm install pi-island@beta`.
+CI auto-detects beta from the git tag name (`v*beta*` -> `--tag beta`).
+
 ---
 
 ## 7. Host binary protocol — companion ↔ island-host
 
-The Swift host (`island-host-bin`) reads one JSON object per line from
-stdin and writes one JSON object per line to stdout. See
-`open-fixed.mjs` for the Node side and `island-host.swift` for the
-Swift side.
+Both the Swift host (macOS) and C# host (Windows) read one JSON object
+per line from stdin and write one JSON object per line to stdout. See
+`open-fixed.mjs` for the Node side, `island-host.swift` for macOS,
+and `island-host.cs` for Windows.
 
 ### 7.1. argv flags we use
 

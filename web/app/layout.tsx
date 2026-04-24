@@ -17,11 +17,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "pi-island — Dynamic Island for your agent",
   description:
-    "A macOS Dynamic-Island-style status capsule for the pi coding agent. Pinned at the top of your screen, live on every turn.",
+    "A Dynamic-Island-style status capsule for the pi coding agent on macOS and Windows. Pinned at the top of your screen, live on every turn.",
   openGraph: {
     title: "pi-island",
     description:
-      "Dynamic Island status capsule for the pi coding agent. Live, native, and notch-aware.",
+      "Dynamic Island status capsule for the pi coding agent. Native on macOS and Windows, notch-aware on MacBooks.",
     url: "https://pi-island.vercel.app",
     siteName: "pi-island",
     type: "website",
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "pi-island",
     description:
-      "Dynamic Island status capsule for the pi coding agent. Live, native, and notch-aware.",
+      "Dynamic Island status capsule for the pi coding agent. Native on macOS and Windows, notch-aware on MacBooks.",
   },
 };
 

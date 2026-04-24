@@ -1,16 +1,16 @@
-// Spawn wrapper for the native Swift host that renders the island.
+// Spawn wrapper for the native host binary that renders the island.
 //
-// Two things this file takes care of:
+// Platform routing:
+//   macOS  → island-host-bin  (Swift, Cocoa + WKWebView)
+//   Windows → island-host-win.exe  (C# WPF + WebView2)
 //
-//   1. Passes --x / --y as TWO separate argv entries, not --x=N
-//      (the Swift host parses them as `--x N` and silently ignores
-//      `--x=N`, which caused the window to land in screen-center instead
-//      of where we asked).
+// Both binaries speak the same stdin/stdout JSON-line protocol
+// (html, eval, close → ready, closed). This file is the only place
+// that knows which binary to spawn — everything above (companion.mjs)
+// talks to the returned FixedWindow object and never branches on OS.
 //
-//   2. Points at OUR host binary (island-host-bin next to this file),
-//      which sets window.level = .statusBar (above the menu bar) and
-//      overrides NSWindow.constrainFrameRect to a no-op, so the capsule
-//      can actually sit at the top edge / notch area.
+// argv quirk (both platforms): --x / --y MUST be passed as two
+// separate entries (`--x 100`), not `--x=100`.
 
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -21,13 +21,30 @@ import { dirname, join } from "node:path";
 
 function resolveBinary() {
   const here = dirname(fileURLToPath(import.meta.url));
-  const bin = join(here, "island-host-bin");
-  if (existsSync(bin)) return bin;
-  throw new Error(
-    "pi-island: native host binary not found at " + bin + "\n" +
-    "Run `npm run build` inside the pi-island directory (requires Xcode " +
-    "Command Line Tools: `xcode-select --install`)."
-  );
+
+  if (process.platform === "darwin") {
+    const bin = join(here, "island-host-bin");
+    if (existsSync(bin)) return bin;
+    throw new Error(
+      "pi-island: macOS host binary not found at " + bin + "\n" +
+      "Run `npm run build` inside the pi-island directory (requires Xcode " +
+      "Command Line Tools: `xcode-select --install`)."
+    );
+  }
+
+  if (process.platform === "win32") {
+    // Framework-dependent build produces multiple files in a directory.
+    // The exe must run from that directory so it can find its DLLs.
+    const bin = join(here, "hosts", "windows", "island-host-win.exe");
+    if (existsSync(bin)) return bin;
+    throw new Error(
+      "pi-island: Windows host binary not found at " + bin + "\n" +
+      "Run `npm run build` inside the pi-island directory (requires " +
+      ".NET 8 SDK: winget install Microsoft.DotNet.SDK.8)."
+    );
+  }
+
+  throw new Error("pi-island: unsupported platform " + process.platform);
 }
 
 class FixedWindow extends EventEmitter {
@@ -69,7 +86,14 @@ class FixedWindow extends EventEmitter {
 
   #write(obj) {
     if (this.#closed) return;
-    try { this.#proc.stdin.write(JSON.stringify(obj) + "\n"); } catch {}
+    try {
+      // Escape all non-ASCII to \uXXXX so the stdin pipe carries only
+      // ASCII bytes. Fixes Turkish/Unicode corruption on Windows where
+      // the pipe encoding may not be UTF-8.
+      const json = JSON.stringify(obj).replace(/[\u0080-\uffff]/g,
+        (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+      this.#proc.stdin.write(json + "\n");
+    } catch {}
   }
 
   send(js)        { this.#write({ type: "eval", js }); }
@@ -96,6 +120,9 @@ export function openFixed(html, options = {}) {
   if (options.x != null) args.push("--x", String(options.x));
   if (options.y != null) args.push("--y", String(options.y));
 
-  const proc = spawn(bin, args, { stdio: ["pipe", "pipe", "inherit"] });
+  // stderr: "inherit" on macOS (useful for Swift logs), "ignore" on Windows
+  // (WebView2 spams harmless GPU errors that would flash a console).
+  const stderr = process.platform === "win32" ? "ignore" : "inherit";
+  const proc = spawn(bin, args, { stdio: ["pipe", "pipe", stderr], windowsHide: true });
   return new FixedWindow(proc, html);
 }

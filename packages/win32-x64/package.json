@@ -1,0 +1,19 @@
+{
+  "name": "@pi-island/win32-x64",
+  "version": "0.3.0-beta.6",
+  "description": "pi-island native host binary for Windows x64",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "island-host-win.exe"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phun333/pi-island.git"
+  }
+}

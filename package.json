@@ -1,6 +1,6 @@
 {
   "name": "pi-island",
-  "version": "0.3.0-beta.6",
+  "version": "0.3.0",
   "description": "Dynamic-Island-style status capsule for the pi coding agent on macOS and Windows. Shows what pi is doing in real time, at the very top of your screen — with native notch-wrap support for MacBooks.",
   "type": "module",
   "keywords": [

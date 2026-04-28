@@ -5,13 +5,13 @@
 **A Dynamic-Island-style status capsule for the [pi coding agent](https://github.com/badlogic/pi-mono).**
 Native, pinned to the top of your screen, live on every turn.
 
-[![npm version](https://img.shields.io/npm/v/pi-island?style=flat-square&color=111&label=npm)](https://www.npmjs.com/package/pi-island)
-[![npm downloads](https://img.shields.io/npm/dw/pi-island?style=flat-square&color=111&label=downloads)](https://www.npmjs.com/package/pi-island)
-[![License: MIT](https://img.shields.io/npm/l/pi-island?style=flat-square&color=111)](LICENSE)
-[![Node ≥ 18](https://img.shields.io/node/v/pi-island?style=flat-square&color=111)](package.json)
-[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-111?style=flat-square)](#platform-support)
-[![CI](https://img.shields.io/github/actions/workflow/status/phun333/pi-island/publish.yml?style=flat-square&color=111&label=ci)](https://github.com/phun333/pi-island/actions/workflows/publish.yml)
-[![GitHub stars](https://img.shields.io/github/stars/phun333/pi-island?style=flat-square&color=111)](https://github.com/phun333/pi-island/stargazers)
+[![npm version](https://img.shields.io/npm/v/pi-island?style=flat-square&color=333&label=npm)](https://www.npmjs.com/package/pi-island)
+[![npm downloads](https://img.shields.io/npm/dw/pi-island?style=flat-square&color=33&label=downloads)](https://www.npmjs.com/package/pi-island)
+[![License: MIT](https://img.shields.io/npm/l/pi-island?style=flat-square&color=333)](LICENSE)
+[![Node ≥ 18](https://img.shields.io/node/v/pi-island?style=flat-square&color=333)](package.json)
+[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-333?style=flat-square)](#platform-support)
+[![CI](https://img.shields.io/github/actions/workflow/status/phun333/pi-island/publish.yml?style=flat-square&color=333&label=ci)](https://github.com/phun333/pi-island/actions/workflows/publish.yml)
+[![GitHub stars](https://img.shields.io/github/stars/phun333/pi-island?style=flat-square&color=333)](https://github.com/phun333/pi-island/stargazers)
 
 [Website](https://pi-island.vercel.app) · [Install](#install) · [Settings](#settings) · [How it works](#how-it-works) · [Troubleshooting](#troubleshooting)
 

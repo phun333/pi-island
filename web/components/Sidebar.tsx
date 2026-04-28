@@ -1,4 +1,7 @@
 import Link from "next/link";
+import rootPkg from "../../package.json";
+
+const VERSION = rootPkg.version;
 
 const sections = [
   { href: "#overview", label: "Overview", active: true },
@@ -66,10 +69,10 @@ export default function Sidebar() {
       {/* Version footer */}
       <div className="flex items-center gap-2 text-[11px] text-[color:var(--foreground-dim)]">
         <a
-          href="https://github.com/phun333/pi-island/releases"
+          href={`https://github.com/phun333/pi-island/releases/tag/v${VERSION}`}
           className="hover:text-[color:var(--foreground)] transition-colors underline underline-offset-2 decoration-dotted"
         >
-          v0.2.0
+          v{VERSION}
         </a>
         <span>·</span>
         <a

@@ -507,6 +507,14 @@ function extractPromptImagePaths(prompt: string): string[] {
 function normalizePromptForDisplay(prompt: string): string {
   let display = String(prompt || "");
 
+  // Markdown image syntax is another common way local screenshots show up in
+  // pasted prompts. The thumbnail carries the actual image, so keep only the
+  // useful alt text in the hover preview and drop the punctuation/path.
+  display = display.replace(/!\[([^\]\r\n]*)\]\(([^)\r\n]+)\)/g, (raw, alt, target) => {
+    const imageTarget = String(target || "").trim().replace(/^<([\s\S]*)>$/, "$1");
+    return normalizePromptImagePath(imageTarget) ? ` ${String(alt || "").trim()} ` : raw;
+  });
+
   // pi's CLI file-argument flow represents attached images as both an
   // ImageContent payload and a lightweight <file name="/path/image.png"> tag
   // in the prompt text. Once we render a thumbnail, that XML-ish marker is UI

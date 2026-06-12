@@ -559,6 +559,19 @@ function normalizeHtmlLocalImageTagsForDisplay(prompt: string): string {
   });
 }
 
+function normalizeHtmlLocalImageAnchorsForDisplay(prompt: string): string {
+  return String(prompt || "").replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, (raw) => {
+    const href = htmlAttrValue(raw, "href");
+    if (!href || !normalizePromptImagePath(href.trim())) return raw;
+    const text = raw
+      .replace(/^<a\b[^>]*>/i, "")
+      .replace(/<\/a>$/i, "")
+      .replace(/<[^>]+>/g, " ")
+      .trim();
+    return text ? ` ${text} ` : " ";
+  });
+}
+
 function normalizePromptForDisplay(prompt: string): string {
   let display = String(prompt || "");
 
@@ -571,8 +584,10 @@ function normalizePromptForDisplay(prompt: string): string {
 
   // Rich clipboard / issue text may include local <img src="..." alt="...">
   // tags. Treat them like Markdown images: render the thumbnail, keep only the
-  // alt label in the hover prompt, and remove broken tag markup.
+  // alt label in the hover prompt, and remove broken tag markup. Local image
+  // anchors get the same treatment, preserving only the human-readable link text.
   display = normalizeHtmlLocalImageTagsForDisplay(display);
+  display = normalizeHtmlLocalImageAnchorsForDisplay(display);
 
   // pi's CLI file-argument flow represents attached images as both an
   // ImageContent payload and a lightweight <file name="/path/image.png"> tag

@@ -156,6 +156,24 @@ try {
       `count=${duplicatePathVariantsImages.count} images=${duplicatePathVariantsImages.images.length} display=${duplicatePathVariantsDisplay}`,
     );
 
+    const directPlusMatchingRawPrompt = `direct pasted image also mentions ${plainPath}`;
+    const directPlusMatchingRaw = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], directPlusMatchingRawPrompt);
+    const directPlusMatchingRawDisplay = displayFn(directPlusMatchingRawPrompt);
+    check(
+      "direct image plus matching raw local path does not duplicate thumbnail count",
+      directPlusMatchingRaw.count === 1 && directPlusMatchingRaw.images.length === 1 && !directPlusMatchingRawDisplay.includes(plainPath) && !directPlusMatchingRawDisplay.includes(basename(plainPath)),
+      `count=${directPlusMatchingRaw.count} images=${directPlusMatchingRaw.images.length} display=${directPlusMatchingRawDisplay}`,
+    );
+
+    const directPlusDifferentRawPrompt = `direct pasted image plus separate image ${separateFileTagPath}`;
+    const directPlusDifferentRaw = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], directPlusDifferentRawPrompt);
+    const directPlusDifferentRawDisplay = displayFn(directPlusDifferentRawPrompt);
+    check(
+      "direct image plus different raw local path keeps both thumbnails",
+      directPlusDifferentRaw.count === 2 && directPlusDifferentRaw.images.length === 2 && !directPlusDifferentRawDisplay.includes(separateFileTagPath) && !directPlusDifferentRawDisplay.includes(basename(separateFileTagPath)),
+      `count=${directPlusDifferentRaw.count} images=${directPlusDifferentRaw.images.length} display=${directPlusDifferentRawDisplay}`,
+    );
+
     const relativePlainPath = relative(ROOT, plainPath);
     const relativePathImages = mod.normalizePromptImages(undefined, `relative screenshot ${relativePlainPath} should render`);
     const relativePathDisplay = displayFn(`relative screenshot ${relativePlainPath} should render`);

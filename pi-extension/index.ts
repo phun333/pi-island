@@ -316,6 +316,13 @@ function promptImageMimeFromDataUrl(data: string): string | null {
   return mime?.startsWith("image/") ? mime : null;
 }
 
+function promptImageMimeFromMetadata(value: any): string | undefined {
+  for (const candidate of [value?.mimeType, value?.mediaType, value?.media_type, value?.mime_type]) {
+    if (typeof candidate === "string" && candidate.toLowerCase().startsWith("image/")) return candidate;
+  }
+  return undefined;
+}
+
 function base64ByteLength(data: string): number {
   const clean = cleanBase64ImageData(data);
   if (!clean) return 0;
@@ -854,21 +861,14 @@ function promptImageHashFromObject(img: any): string | null {
   if (img.type !== "image") return null;
 
   const directData = typeof img.data === "string" ? img.data : undefined;
-  const directMime =
-    typeof img.mimeType === "string" && img.mimeType.toLowerCase().startsWith("image/") ? img.mimeType :
-    directData ? promptImageMimeFromDataUrl(directData) :
-    undefined;
+  const directMime = promptImageMimeFromMetadata(img) ?? (directData ? promptImageMimeFromDataUrl(directData) : undefined);
   if (directData && directMime) {
     return promptImageHashFromBase64(directData);
   }
 
   const source = img.source;
   const sourceData = typeof source?.data === "string" ? source.data : undefined;
-  const sourceMime =
-    typeof source?.mediaType === "string" && source.mediaType.toLowerCase().startsWith("image/") ? source.mediaType :
-    typeof source?.media_type === "string" && source.media_type.toLowerCase().startsWith("image/") ? source.media_type :
-    sourceData ? promptImageMimeFromDataUrl(sourceData) :
-    undefined;
+  const sourceMime = promptImageMimeFromMetadata(source) ?? (sourceData ? promptImageMimeFromDataUrl(sourceData) : undefined);
   if (source?.type === "base64" && sourceData && sourceMime) {
     return promptImageHashFromBase64(sourceData);
   }
@@ -891,21 +891,14 @@ function normalizePromptImageObject(img: any): IslandPromptImage | null {
   if (img.type !== "image") return null;
 
   const directData = typeof img.data === "string" ? img.data : undefined;
-  const directMime =
-    typeof img.mimeType === "string" && img.mimeType.toLowerCase().startsWith("image/") ? img.mimeType :
-    directData ? promptImageMimeFromDataUrl(directData) :
-    undefined;
+  const directMime = promptImageMimeFromMetadata(img) ?? (directData ? promptImageMimeFromDataUrl(directData) : undefined);
   if (directData && directMime) {
     return makePromptImageFromBase64(directData, directMime);
   }
 
   const source = img.source;
   const sourceData = typeof source?.data === "string" ? source.data : undefined;
-  const sourceMime =
-    typeof source?.mediaType === "string" && source.mediaType.toLowerCase().startsWith("image/") ? source.mediaType :
-    typeof source?.media_type === "string" && source.media_type.toLowerCase().startsWith("image/") ? source.media_type :
-    sourceData ? promptImageMimeFromDataUrl(sourceData) :
-    undefined;
+  const sourceMime = promptImageMimeFromMetadata(source) ?? (sourceData ? promptImageMimeFromDataUrl(sourceData) : undefined);
   if (source?.type === "base64" && sourceData && sourceMime) {
     return makePromptImageFromBase64(sourceData, sourceMime);
   }

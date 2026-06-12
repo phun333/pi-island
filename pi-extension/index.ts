@@ -605,8 +605,48 @@ function extractPromptImagePaths(prompt: string): string[] {
   return extractPromptImagePathMatches(prompt).map((match) => match.path);
 }
 
+function markdownReferenceKey(label: string): string {
+  return normalizePrompt(decodeHtmlEntities(label)).toLowerCase();
+}
+
 function normalizeMarkdownLocalImageReferencesForDisplay(prompt: string): string {
   let display = String(prompt || "");
+
+  // Reference-style Markdown can hide the local image path in a later definition:
+  //   ![alt][shot]
+  //   [shot]: /tmp/a.png "title"
+  // Treat a definition that resolves to a local image as attachment metadata,
+  // replace its usages with readable label text, and remove the definition line.
+  const referenceKeys = new Set<string>();
+  const definitionSpans: Array<{ start: number; end: number }> = [];
+  for (const match of extractPromptImagePathMatches(display, { dedupe: false }).filter((m) => m.index >= 0)) {
+    const lineStart = Math.max(display.lastIndexOf("\n", match.index) + 1, display.lastIndexOf("\r", match.index) + 1);
+    const before = display.slice(lineStart, match.index);
+    const definition = before.match(/^\s{0,3}\[([^\]\r\n]+)\]:\s*<?$/);
+    if (!definition) continue;
+
+    const afterStart = match.index + match.raw.length;
+    const tail = display.slice(afterStart).match(/^\s*>?(?:\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^\)\r\n]*\)))?\s*(?:\r?\n|$)/);
+    if (!tail) continue;
+
+    const key = markdownReferenceKey(definition[1] || "");
+    if (!key) continue;
+    referenceKeys.add(key);
+    definitionSpans.push({ start: lineStart, end: afterStart + tail[0].length });
+  }
+
+  if (referenceKeys.size > 0) {
+    for (const span of definitionSpans.sort((a, b) => b.start - a.start)) {
+      display = display.slice(0, span.start) + " " + display.slice(span.end);
+    }
+    display = display.replace(/!?\[([^\]\r\n]*)\]\[([^\]\r\n]*)\]/g, (raw, label, id) => {
+      const key = markdownReferenceKey(id || label || "");
+      if (!referenceKeys.has(key)) return raw;
+      const text = decodeHtmlEntities(String(label || "").trim());
+      return text ? ` ${text} ` : " ";
+    });
+  }
+
   const matches = extractPromptImagePathMatches(display, { dedupe: false })
     .filter((match) => match.index >= 0)
     .sort((a, b) => b.index - a.index);

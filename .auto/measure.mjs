@@ -398,6 +398,15 @@ try {
       `count=${htmlSourceSrc.count} images=${htmlSourceSrc.images.length} display=${htmlSourceSrcDisplay}`,
     );
 
+    const htmlSourcePairedPrompt = `see <source src="${plainPath}" type="image/png"></source> before fixing`;
+    const htmlSourcePaired = mod.normalizePromptImages(undefined, htmlSourcePairedPrompt);
+    const htmlSourcePairedDisplay = displayFn(htmlSourcePairedPrompt);
+    check(
+      "paired html source local image renders and removes closing tag clutter",
+      htmlSourcePaired.count === 1 && htmlSourcePaired.images.length === 1 && !htmlSourcePairedDisplay.includes("<source") && !htmlSourcePairedDisplay.includes("</source>") && !htmlSourcePairedDisplay.includes("src=") && !htmlSourcePairedDisplay.includes(plainPath) && !htmlSourcePairedDisplay.includes(basename(plainPath)),
+      `count=${htmlSourcePaired.count} images=${htmlSourcePaired.images.length} display=${htmlSourcePairedDisplay}`,
+    );
+
     const htmlPicturePrompt = `see <picture><source srcset="${srcsetAltPath} 2x"><img src="${plainPath}" alt="picture shot"></picture> before fixing`;
     const htmlPicture = mod.normalizePromptImages(undefined, htmlPicturePrompt);
     const htmlPictureDisplay = displayFn(htmlPicturePrompt);

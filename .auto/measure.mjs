@@ -42,6 +42,7 @@ const separateFileTagPath = join(imgDir, "separate-file-attachment.gif");
 const spacedPath = join(imgDir, "Screen Shot 2026-06-12 at 11.44.01.png");
 const extensionlessPath = join(imgDir, "clipboard-image-without-extension");
 const parenPath = join(imgDir, "Screen Shot (1).png");
+const ampPath = join(imgDir, "R&D Screen Shot.png");
 const srcsetAltPath = join(imgDir, "srcset-large.png");
 const relDir = mkdtempSync(join(ROOT, ".auto", "tmp-rel-images-"));
 const cwdRelativePath = `./${relative(ROOT, join(relDir, "relative Screen Shot.png"))}`;
@@ -53,6 +54,7 @@ writeFileSync(separateFileTagPath, tinyGif);
 writeFileSync(spacedPath, tinyPng);
 writeFileSync(extensionlessPath, tinyPng);
 writeFileSync(parenPath, tinyPng);
+writeFileSync(ampPath, tinyPng);
 writeFileSync(srcsetAltPath, tinyPng);
 writeFileSync(join(ROOT, cwdRelativePath), tinyPng);
 
@@ -322,6 +324,15 @@ try {
       "html img tag with alt before src and spaced local path renders cleanly",
       htmlImgAltFirst.count === 1 && htmlImgAltFirst.images.length === 1 && htmlImgAltFirstDisplay.includes("space shot") && !htmlImgAltFirstDisplay.includes("<img") && !htmlImgAltFirstDisplay.includes("src=") && !htmlImgAltFirstDisplay.includes(basename(spacedPath)),
       `count=${htmlImgAltFirst.count} images=${htmlImgAltFirst.images.length} display=${htmlImgAltFirstDisplay}`,
+    );
+
+    const htmlEscapedImgPrompt = `see <img src="${ampPath.replace(/&/g, "&amp;")}" alt="R&amp;D screenshot"> now`;
+    const htmlEscapedImg = mod.normalizePromptImages(undefined, htmlEscapedImgPrompt);
+    const htmlEscapedImgDisplay = displayFn(htmlEscapedImgPrompt);
+    check(
+      "html img tag with entity-escaped local path renders and leaves decoded alt text",
+      htmlEscapedImg.count === 1 && htmlEscapedImg.images.length === 1 && htmlEscapedImgDisplay.includes("R&D screenshot") && !htmlEscapedImgDisplay.includes("&amp;") && !htmlEscapedImgDisplay.includes("<img") && !htmlEscapedImgDisplay.includes("src=") && !htmlEscapedImgDisplay.includes(basename(ampPath)),
+      `count=${htmlEscapedImg.count} images=${htmlEscapedImg.images.length} display=${htmlEscapedImgDisplay}`,
     );
 
     const htmlImgSrcsetPrompt = `see <img srcset="${plainPath} 1x" alt="bug srcset"> before fixing`;

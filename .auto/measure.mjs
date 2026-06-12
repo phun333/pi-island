@@ -78,6 +78,13 @@ try {
   const direct = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], "describe this");
   check("direct ImageContent attachment renders", direct.count === 1 && direct.images.length === 1 && direct.images[0]?.mimeType === "image/png");
 
+  const directDataUrl = mod.normalizePromptImages([{ type: "image", data: `data:image/png;base64,${tinyPngBase64}` }], "describe data url image");
+  check(
+    "direct data URL ImageContent infers mime type and renders",
+    directDataUrl.count === 1 && directDataUrl.images.length === 1 && directDataUrl.images[0]?.mimeType === "image/png",
+    `count=${directDataUrl.count} images=${directDataUrl.images.length} mime=${directDataUrl.images[0]?.mimeType}`,
+  );
+
   const duplicateDirect = mod.normalizePromptImages([
     { type: "image", data: tinyPngBase64, mimeType: "image/png" },
     { type: "image", data: tinyPngBase64, mimeType: "image/png" },

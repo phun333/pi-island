@@ -36,8 +36,9 @@ Native, pinned to the top of your screen, live on every turn.
 - **Native rendering on every platform.** WKWebView (Swift) on macOS, WebView2 (C#) on Windows — no Electron, no shipped Chromium, no taskbar entry.
 - **Notch-aware.** On MacBooks with a notch the capsule splits to wrap around it. On other displays it falls back to a single rounded pill.
 - **One row per pi session.** Run pi in five terminals, get five stacked rows in a single capsule.
+- **Context ring.** Context usage is a colored circular progress ring with rounded arc ends; hover the ring for the exact-percent tooltip.
 - **Click-through, frameless, always-on-top.** Never steals focus, never blocks what's behind it.
-- **Live config.** Type `/island` in any pi session to change size, screen, or notch behavior without restarting.
+- **Live config.** Type `/island` in any pi session to change size, screen, notch behavior, or prompt-hover reveal without restarting.
 - **Zero runtime dependencies.** The npm package has `"dependencies": {}`. The native host is the only binary.
 - **Compile on install.** Postinstall builds the host for your platform; missing toolchain is a soft-fail, never a crash.
 
@@ -93,7 +94,7 @@ Inside any pi session, open the settings panel:
 /island
 ```
 
-A drop-down opens with four rows. Cycle any row's value with **Enter** or **Space**.
+A drop-down opens with settings rows. Cycle any row's value with **Enter** or **Space**.
 
 | Setting     | Values                                       | Notes                                                                                          |
 |-------------|----------------------------------------------|------------------------------------------------------------------------------------------------|
@@ -101,6 +102,7 @@ A drop-down opens with four rows. Cycle any row's value with **Enter** or **Spac
 | Size        | `small` &middot; `medium` &middot; `large` &middot; `xlarge` | Live — no respawn.                                                                  |
 | Screen      | `primary` &middot; `active` &middot; `2` &middot; `3` … | `primary` = menu-bar display, `active` = under the mouse, numbers for multi-monitor.    |
 | Notch wrap  | `auto` &middot; `normal` &middot; `notch`    | macOS only. `auto` detects automatically; you can also force on/off. Inert on Windows.         |
+| Prompt hover | `enabled` &middot; `disabled`             | Prompt stays hidden in the compact row. When enabled, hovering a row reveals it underneath.     |
 
 Choices persist in `~/.pi/pi-island.json` and survive every pi restart.
 
@@ -115,10 +117,13 @@ For muscle memory and scripts:
 /island size large
 /island screen primary
 /island notch notch
+/island prompt off    # alias values: on/off, enabled/disabled, toggle
 /island reload        # reset companion state (emergency eject)
 ```
 
 Run pi in multiple terminals — each session gets its own row, stacked into one continuous capsule sized to the longest row.
+
+Prompt hover also shows image attachments. If the prompt contains a readable local image path like `/var/.../clipboard.png`, `~/Desktop/screenshot.jpg`, a path with spaces, or a `file://` URL, pi-island renders it as an image tile in the hover reveal. Before tool details appear, attached images also show as tiny compact-row thumbnails.
 
 ## How it works
 
@@ -200,9 +205,10 @@ Settings live at `~/.pi/pi-island.json`:
 ```json
 {
   "enabled": true,
-  "size": "medium",
+  "scale": "medium",
   "screen": "primary",
-  "notchWrap": "auto"
+  "notchMode": "auto",
+  "promptHover": true
 }
 ```
 
@@ -232,7 +238,8 @@ pi-island/
 
 The dev/release workflow is documented in [`docs/RELEASING.md`](docs/RELEASING.md). Highlights:
 
-- `npm run dev:link` — symlink the global `pi-island` to this repo for live edits
+- `npm run dev:link` — build, symlink the global `pi-island` to this repo, and restart the island daemon for live edits
+- `npm run dev:update` — run `pi update`, then rebuild, restore the local dev symlink, and restart the island daemon
 - `npm run pack:test` — produce the exact tarball `npm publish` would upload, install it globally, and run real pi flows against it
 - `npm run release:patch` / `:minor` / `:major` — bump, commit, tag, push (CI publishes to npm)
 - `npm run release:beta` — bump to a `-beta.N` pre-release; CI routes it to the `beta` npm dist-tag

@@ -113,6 +113,8 @@ sealed class IslandHost : IDisposable
 
     private readonly Config _config;
     private readonly WebView2 _webView;
+    private System.Windows.Forms.Timer? _hoverTimer;
+    private Point? _lastHoverPoint;
     private int _exiting;
 
     public Form Form { get; }
@@ -261,10 +263,49 @@ sealed class IslandHost : IDisposable
         };
 
         // Ready after every navigation
-        _webView.CoreWebView2.NavigationCompleted += (_, _) => EmitReady();
+        _webView.CoreWebView2.NavigationCompleted += (_, _) =>
+        {
+            EmitReady();
+            _lastHoverPoint = null; // new document, resend current hover once
+            EmitHoverAt(Cursor.Position);
+        };
 
         // Trigger first ready
         _webView.CoreWebView2.NavigateToString("<html><body></body></html>");
+
+        if (_config.ClickThrough)
+            StartHoverTracking();
+    }
+
+    // ── Synthetic hover ────────────────────────────────────────────────────
+
+    private void StartHoverTracking()
+    {
+        if (_hoverTimer != null) return;
+        _hoverTimer = new System.Windows.Forms.Timer { Interval = 50 };
+        _hoverTimer.Tick += (_, _) => EmitHoverAt(Cursor.Position);
+        _hoverTimer.Start();
+        EmitHoverAt(Cursor.Position);
+    }
+
+    private void StopHoverTracking()
+    {
+        if (_hoverTimer == null) return;
+        _hoverTimer.Stop();
+        _hoverTimer.Dispose();
+        _hoverTimer = null;
+        _lastHoverPoint = null;
+    }
+
+    private void EmitHoverAt(Point screenPoint)
+    {
+        if (_webView.CoreWebView2 == null) return;
+        var p = Form.PointToClient(screenPoint);
+        if (!Form.ClientRectangle.Contains(p))
+            p = new Point(-1, -1);
+        if (_lastHoverPoint.HasValue && _lastHoverPoint.Value == p) return;
+        _lastHoverPoint = p;
+        _ = _webView.CoreWebView2.ExecuteScriptAsync($"window.island&&window.island.hoverAt({p.X},{p.Y})");
     }
 
     // ── Stdin reader ───────────────────────────────────────────────────────
@@ -354,11 +395,16 @@ sealed class IslandHost : IDisposable
     private void CloseAndExit()
     {
         if (Interlocked.Exchange(ref _exiting, 1) == 1) return;
+        StopHoverTracking();
         try { Stdout.Write(new JsonObject { ["type"] = "closed" }); } catch { }
         Environment.Exit(0);
     }
 
-    public void Dispose() => _webView.Dispose();
+    public void Dispose()
+    {
+        StopHoverTracking();
+        _webView.Dispose();
+    }
 }
 
 // ── Entry point ────────────────────────────────────────────────────────────

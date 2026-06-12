@@ -10,12 +10,14 @@
 // Protocol (client → server, one JSON object per line):
 //   { "id": "<session-uuid>", "type": "update",
 //     "project": "...", "status": "thinking", "detail": "...",
-//     "prompt": "...", "ctxPct": 34, "frozenElapsed": <ms>|null }
+//     "prompt": "...", "promptImages": [{ "data": "...", "mimeType": "image/png" }],
+//     "promptImageCount": 1, "ctxPct": 34, "frozenElapsed": <ms>|null }
 //   { "id": "<session-uuid>", "type": "remove" }
-//   { "id": "<session-uuid>", "type": "mode",    "mode":  "normal"|"notch" }
-//   { "id": "<session-uuid>", "type": "scale",   "scale": "small"|"medium"|"large" }
+//   { "id": "<session-uuid>", "type": "mode",         "mode":  "normal"|"notch" }
+//   { "id": "<session-uuid>", "type": "scale",        "scale": "small"|"medium"|"large"|"xlarge" }
+//   { "id": "<session-uuid>", "type": "prompt-hover", "enabled": true|false }
 //   { "id": "<session-uuid>", "type": "respawn" }
-//   { "id": "<session-uuid>", "type": "hello",   "version": "0.2.1" }
+//   { "id": "<session-uuid>", "type": "hello",        "version": "0.2.1" }
 //
 // Server → client (only for version handshake, one JSON object per line):
 //   { "type": "hello-ack", "version": "0.2.1" }
@@ -26,9 +28,11 @@
 // rows. Every concrete type is dispatched explicitly now.
 //
 // On startup the companion also reads ~/.pi/pi-island.json for settings it
-// owns (screen, notchMode). Clients bump those via the `respawn` message
-// after updating the pref file — NSWindow geometry is fixed at spawn so a
-// live screen change requires a fresh process.
+// owns at spawn time (screen, notchMode, initial promptHover). Clients
+// bump geometry settings via the `respawn` message after updating the pref
+// file. For OS display hot-plug/unplug, this daemon keeps client sockets
+// alive and recreates only the native host window because host geometry is
+// fixed at spawn.
 //
 // When the last client disconnects we keep the window for 6s so a quick
 // reconnect (pi /new, /reload, etc.) doesn't flash the capsule closed,
@@ -43,7 +47,7 @@ import { fileURLToPath } from "node:url";
 import { openFixed } from "./open-fixed.mjs";
 import { buildIslandHTML } from "./island.html.mjs";
 import { SOCK } from "./socket-path.mjs";
-import { getScreenGeometry, computeWindowPosition, resolveNotchMode } from "./platform.mjs";
+import { getScreenGeometry, getDisplaySignature, computeWindowPosition, resolveNotchMode } from "./platform.mjs";
 
 // ---- Version handshake ----------------------------------------------------
 // Used by the client so it can notice a version mismatch (e.g. user ran
@@ -71,9 +75,9 @@ const VALID_STATUS = new Set([
 
 // ---- User preference --------------------------------------------------
 // Small subset of ~/.pi/pi-island.json that this process cares about.
-// The client-side extension owns the full schema; we only read the two
-// fields that drive geometry (screen + notchMode) and silently ignore
-// the rest so old/new formats coexist.
+// The client-side extension owns the full schema; we read geometry fields
+// (screen + notchMode) plus the initial prompt-hover flag and silently
+// ignore the rest so old/new formats coexist.
 const PREF_FILE = join(homedir(), ".pi", "pi-island.json");
 
 function readPref() {
@@ -102,31 +106,91 @@ const NOTCH_PREF =
   _pref.notchMode === "normal" || _pref.notchMode === "notch"
     ? _pref.notchMode
     : "auto";
+const PROMPT_HOVER_PREF = _pref.promptHover !== false;
 
-const screenGeo = getScreenGeometry(SCREEN_PREF);
-const { x, y } = computeWindowPosition(screenGeo, WIN_W, WIN_H);
-const autoMode = resolveNotchMode(NOTCH_PREF, screenGeo.notch);
-
-const win = openFixed(buildIslandHTML(), {
-  width: WIN_W, height: WIN_H, x, y,
-  frameless: true, floating: true, transparent: true,
-  clickThrough: true, noDock: true,
-});
-
+let currentMode = "normal";
+let currentScale = null;
+let currentPromptHover = PROMPT_HOVER_PREF;
+let currentScreenGeo = null;
+let cleaned = false;
+let win = null;
 let winReady = false;
 const pending = [];
+const ignoredHostCloses = new WeakSet();
+const rowState = new Map();
+
 function send(js) {
-  if (winReady) try { win.send(js); } catch {}
+  if (winReady && win) try { win.send(js); } catch {}
   else pending.push(js);
 }
 
-win.on("ready", () => {
-  winReady = true;
-  send(`window.island.setMode(${JSON.stringify(autoMode)})`);
-  for (const js of pending.splice(0)) win.send(js);
-});
-win.on("closed", () => { cleanup(); process.exit(0); });
-win.on("error", () => { /* keep running; the host may emit harmless errors */ });
+function openIslandWindow() {
+  currentScreenGeo = getScreenGeometry(SCREEN_PREF);
+  const { x, y } = computeWindowPosition(currentScreenGeo, WIN_W, WIN_H);
+  currentMode = resolveNotchMode(NOTCH_PREF, currentScreenGeo.notch);
+
+  const nextWin = openFixed(buildIslandHTML(), {
+    width: WIN_W, height: WIN_H, x, y,
+    frameless: true, floating: true, transparent: true,
+    clickThrough: true, noDock: true,
+  });
+
+  win = nextWin;
+  winReady = false;
+
+  nextWin.on("ready", () => {
+    if (win !== nextWin) return;
+    winReady = true;
+    nextWin.send(`window.island.setMode(${JSON.stringify(currentMode)})`);
+    nextWin.send(`window.island.setPromptHover(${currentPromptHover ? "true" : "false"})`);
+    if (currentScale) nextWin.send(`window.island.setScale(${JSON.stringify(currentScale)})`);
+    for (const [id, row] of rowState) {
+      nextWin.send(`window.island.upsertRow(${JSON.stringify(id)},${JSON.stringify(row)})`);
+    }
+    for (const js of pending.splice(0)) nextWin.send(js);
+  });
+
+  nextWin.on("closed", () => {
+    if (ignoredHostCloses.has(nextWin)) {
+      ignoredHostCloses.delete(nextWin);
+      return;
+    }
+    cleanup();
+    process.exit(0);
+  });
+  nextWin.on("error", () => { /* keep running; the host may emit harmless errors */ });
+}
+
+function reloadIslandWindow() {
+  if (cleaned) return;
+  const oldWin = win;
+  if (oldWin) ignoredHostCloses.add(oldWin);
+  openIslandWindow();
+  if (oldWin) { try { oldWin.close(); } catch {} }
+}
+
+openIslandWindow();
+
+// Display hot-plug watcher --------------------------------------------------
+// macOS may move a borderless statusBar-level window to a weird center-ish
+// fallback position when an external monitor is attached/detached. The host
+// window geometry is fixed at spawn, so keep the companion + sockets alive but
+// recreate just the native host and replay the latest row state.
+const DISPLAY_POLL_MS = 1500;
+const DISPLAY_RELOAD_DEBOUNCE_MS = 700;
+let displaySignature = getDisplaySignature();
+let displayReloadTimer = null;
+const displayPollTimer = setInterval(() => {
+  const next = getDisplaySignature();
+  if (!next || next === displaySignature) return;
+  displaySignature = next;
+  if (displayReloadTimer) clearTimeout(displayReloadTimer);
+  displayReloadTimer = setTimeout(() => {
+    displayReloadTimer = null;
+    displaySignature = getDisplaySignature();
+    reloadIslandWindow();
+  }, DISPLAY_RELOAD_DEBOUNCE_MS);
+}, DISPLAY_POLL_MS);
 
 // ---- Socket server --------------------------------------------------------
 // Unix sockets leave a file on disk that must be cleaned up before
@@ -193,17 +257,21 @@ const server = createServer((sock) => {
       // Require a valid status — empty / unknown statuses are dropped at
       // the boundary so malformed clients can't create ghost rows.
       if (!msg.id || !VALID_STATUS.has(msg.status)) return;
+      const merged = Object.assign({}, rowState.get(msg.id) || {}, msg);
+      rowState.set(msg.id, merged);
       send(`window.island.upsertRow(${JSON.stringify(msg.id)},${JSON.stringify(msg)})`);
       return;
     }
 
     if (msg.type === "remove") {
       if (!msg.id) return;
+      rowState.delete(msg.id);
       send(`window.island.removeRow(${JSON.stringify(msg.id)})`);
       return;
     }
 
     if (msg.type === "mode" && (msg.mode === "normal" || msg.mode === "notch")) {
+      currentMode = msg.mode;
       send(`window.island.setMode(${JSON.stringify(msg.mode)})`);
       return;
     }
@@ -213,7 +281,16 @@ const server = createServer((sock) => {
       // here, just forward. This keeps the companion agnostic to the preset
       // list so new sizes can land in index.ts + island.html.mjs without a
       // companion change.
+      currentScale = msg.scale;
       send(`window.island.setScale(${JSON.stringify(msg.scale)})`);
+      return;
+    }
+
+    if (msg.type === "prompt-hover" && typeof msg.enabled === "boolean") {
+      // Live toggle: prompt text stays hidden in the compact row; this only
+      // controls whether hover expands the row to reveal it.
+      currentPromptHover = msg.enabled;
+      send(`window.island.setPromptHover(${msg.enabled ? "true" : "false"})`);
       return;
     }
 
@@ -233,7 +310,10 @@ const server = createServer((sock) => {
     clients.delete(sock);
     const ids = socketIds.get(sock);
     if (ids) {
-      for (const id of ids) send(`window.island.removeRow(${JSON.stringify(id)})`);
+      for (const id of ids) {
+        rowState.delete(id);
+        send(`window.island.removeRow(${JSON.stringify(id)})`);
+      }
       socketIds.delete(sock);
     }
     if (clients.size === 0) scheduleIdleExit();
@@ -253,13 +333,14 @@ server.on("error", (err) => {
 server.listen(SOCK, () => { /* ready */ });
 
 // ---- Cleanup --------------------------------------------------------------
-let cleaned = false;
 function cleanup() {
   if (cleaned) return;
   cleaned = true;
+  try { clearInterval(displayPollTimer); } catch {}
+  if (displayReloadTimer) { try { clearTimeout(displayReloadTimer); } catch {} displayReloadTimer = null; }
   try { server.close(); } catch {}
   if (process.platform !== "win32") { try { if (existsSync(SOCK)) unlinkSync(SOCK); } catch {} }
-  try { win.close(); } catch {}
+  try { win?.close(); } catch {}
 }
 process.on("SIGTERM", () => { cleanup(); process.exit(0); });
 process.on("SIGINT",  () => { cleanup(); process.exit(0); });

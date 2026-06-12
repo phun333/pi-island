@@ -16,12 +16,12 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder, getSettingsListTheme } from "@mariozechner/pi-coding-agent";
 import { Container, SettingsList, type SettingItem } from "@mariozechner/pi-tui";
 import { connect, type Socket } from "node:net";
-import { spawn, execSync } from "node:child_process";
-import { basename, join, dirname } from "node:path";
+import { spawn, execSync, execFileSync } from "node:child_process";
+import { basename, join, dirname, extname, isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { SOCK } from "./socket-path.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -46,15 +46,16 @@ const EXTENSION_VERSION = readExtensionVersion();
 // sensible defaults so old installs keep working on upgrade.
 //
 //   {
-//     "enabled":   true,            // visibility toggle
-//     "scale":     "medium",        // size preset
-//     "screen":    "primary",       // which display
-//     "notchMode": "auto"           // notch-wrap policy
+//     "enabled":     true,            // visibility toggle
+//     "scale":       "medium",        // size preset
+//     "screen":      "primary",       // which display
+//     "notchMode":   "auto",          // notch-wrap policy
+//     "promptHover": true             // reveal prompt when hovering a row
 //   }
 //
 // The companion reads the same file at spawn time for settings it owns
-// (screen + notch). Settings that change live (size, visibility) are
-// delivered over the socket as well.
+// (screen + notch). Settings that change live (size, visibility,
+// prompt-hover) are delivered over the socket as well.
 const PREF_DIR  = join(homedir(), ".pi");
 const PREF_FILE = join(PREF_DIR, "pi-island.json");
 
@@ -85,6 +86,7 @@ type Preference = {
   scale:       Scale;
   screen:      ScreenPref;
   notchMode:   NotchMode;
+  promptHover: boolean;
   // Version of pi-island that last wrote this file. Used to fire a
   // one-time welcome notify after `npm update` so the user knows the
   // upgrade happened (and that state was auto-healed if needed).
@@ -104,22 +106,43 @@ function isScreen(v: unknown): v is ScreenPref {
   const n = parseInt(v, 10);
   return Number.isFinite(n) && n >= 1 && String(n) === v;
 }
+function parseToggle(v: unknown): boolean | null {
+  if (typeof v !== "string") return null;
+  switch (v.toLowerCase()) {
+    case "on":
+    case "enable":
+    case "enabled":
+    case "true":
+    case "yes":
+      return true;
+    case "off":
+    case "disable":
+    case "disabled":
+    case "false":
+    case "no":
+      return false;
+    default:
+      return null;
+  }
+}
 
 function readPreference(): Preference {
   const fallback: Preference = {
-    enabled:   true,
-    scale:     DEFAULT_SCALE,
-    screen:    DEFAULT_SCREEN,
-    notchMode: DEFAULT_NOTCH,
+    enabled:     true,
+    scale:       DEFAULT_SCALE,
+    screen:      DEFAULT_SCREEN,
+    notchMode:   DEFAULT_NOTCH,
+    promptHover: true,
   };
   try {
     if (!existsSync(PREF_FILE)) return fallback;
     const data = JSON.parse(readFileSync(PREF_FILE, "utf8"));
     return {
-      enabled:     data?.enabled   !== false,
+      enabled:     data?.enabled !== false,
       scale:       isScale(data?.scale)          ? data.scale     : DEFAULT_SCALE,
       screen:      isScreen(data?.screen)        ? data.screen    : DEFAULT_SCREEN,
       notchMode:   isNotchMode(data?.notchMode)  ? data.notchMode : DEFAULT_NOTCH,
+      promptHover: data?.promptHover !== false,
       lastVersion: typeof data?.lastVersion === "string" ? data.lastVersion : undefined,
     };
   } catch {
@@ -153,6 +176,10 @@ interface IslandUpdate {
   status: string;
   detail?: string;
 }
+interface IslandPromptImage {
+  data: string;
+  mimeType: string;
+}
 function toolToIsland(toolName: string, args: any): IslandUpdate {
   const a = args ?? {};
   switch (toolName) {
@@ -171,10 +198,306 @@ function toolToIsland(toolName: string, args: any): IslandUpdate {
   }
 }
 
-function truncatePrompt(s: string, max = 48): string {
-  const clean = String(s || "").replace(/\s+/g, " ").trim();
-  if (!clean) return "";
-  return clean.length > max ? clean.slice(0, max - 1) + "…" : clean;
+function normalizePrompt(s: string): string {
+  return String(s || "").replace(/\s+/g, " ").trim();
+}
+
+const MAX_PROMPT_IMAGES = 4;
+const MAX_PROMPT_IMAGE_PATHS = 12;
+// Source images can be fairly large when they come from macOS screenshot / clipboard flows.
+// We never ship the original over IPC when it is large: sips creates a tiny PNG thumbnail first.
+const MAX_PROMPT_IMAGE_SOURCE_BYTES = 50 * 1024 * 1024;
+const MAX_INLINE_PROMPT_IMAGE_BYTES = 512 * 1024;
+const PROMPT_THUMBNAIL_PX = 160;
+const DONE_HIDE_MS = 400;
+const DONE_HIDE_WITH_IMAGES_MS = DONE_HIDE_MS;
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  ".png":  "image/png",
+  ".jpg":  "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif":  "image/gif",
+  ".webp": "image/webp",
+  ".bmp":  "image/bmp",
+  ".avif": "image/avif",
+  ".heic": "image/heic",
+  ".heif": "image/heif",
+  ".svg":  "image/svg+xml",
+  ".tif":  "image/tiff",
+  ".tiff": "image/tiff",
+};
+
+function promptImageMimeForPath(path: string): string | null {
+  return IMAGE_MIME_BY_EXT[extname(path).toLowerCase()] ?? null;
+}
+
+function sniffPromptImageMime(imagePath: string): string | null {
+  // Extensionless temp files show up in some clipboard / drag-paste flows.
+  // Sniff a small prefix so those still render instead of requiring a suffix.
+  try {
+    const st = statSync(imagePath);
+    if (!st.isFile() || st.size <= 0 || st.size > MAX_PROMPT_IMAGE_SOURCE_BYTES) return null;
+  } catch {
+    return null;
+  }
+  const buf = Buffer.alloc(512);
+  let bytesRead = 0;
+  let fd: number | null = null;
+  try {
+    fd = openSync(imagePath, "r");
+    bytesRead = readSync(fd, buf, 0, buf.length, 0);
+  } catch {
+    return null;
+  } finally {
+    if (fd != null) try { closeSync(fd); } catch {}
+  }
+  const head = buf.subarray(0, bytesRead);
+  if (head.length >= 8 &&
+      head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47 &&
+      head[4] === 0x0d && head[5] === 0x0a && head[6] === 0x1a && head[7] === 0x0a) {
+    return "image/png";
+  }
+  if (head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (head.length >= 6 && (head.subarray(0, 6).toString("ascii") === "GIF87a" || head.subarray(0, 6).toString("ascii") === "GIF89a")) {
+    return "image/gif";
+  }
+  if (head.length >= 12 && head.subarray(0, 4).toString("ascii") === "RIFF" && head.subarray(8, 12).toString("ascii") === "WEBP") {
+    return "image/webp";
+  }
+  if (head.length >= 2 && head[0] === 0x42 && head[1] === 0x4d) {
+    return "image/bmp";
+  }
+  if (head.length >= 4 &&
+      ((head[0] === 0x49 && head[1] === 0x49 && head[2] === 0x2a && head[3] === 0x00) ||
+       (head[0] === 0x4d && head[1] === 0x4d && head[2] === 0x00 && head[3] === 0x2a))) {
+    return "image/tiff";
+  }
+  if (head.length >= 12 && head.subarray(4, 8).toString("ascii") === "ftyp") {
+    const brand = head.subarray(8, Math.min(head.length, 32)).toString("ascii");
+    if (/avif|avis/.test(brand)) return "image/avif";
+    if (/heic|heix|hevc|hevx|mif1|msf1/.test(brand)) return "image/heic";
+  }
+  const ascii = head.toString("utf8").trimStart().slice(0, 128).toLowerCase();
+  if (ascii.startsWith("<svg") || (ascii.startsWith("<?xml") && ascii.includes("<svg"))) {
+    return "image/svg+xml";
+  }
+  return null;
+}
+
+function promptImageMimeForFile(imagePath: string): string | null {
+  return promptImageMimeForPath(imagePath) ?? sniffPromptImageMime(imagePath);
+}
+
+function promptImageExtForMime(mimeType: string): string {
+  const entry = Object.entries(IMAGE_MIME_BY_EXT).find(([, mime]) => mime === mimeType);
+  return entry ? entry[0] : ".png";
+}
+
+function cleanBase64ImageData(data: string): string {
+  const comma = data.indexOf(",");
+  const raw = data.trim().startsWith("data:") && comma >= 0 ? data.slice(comma + 1) : data;
+  return raw.replace(/\s+/g, "");
+}
+
+function base64ByteLength(data: string): number {
+  const clean = cleanBase64ImageData(data);
+  if (!clean) return 0;
+  const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
+}
+
+function makePromptThumbnailFromFile(imagePath: string): IslandPromptImage | null {
+  if (process.platform !== "darwin") return null;
+
+  const outPath = join(tmpdir(), `pi-island-thumb-${randomUUID()}.png`);
+  try {
+    execFileSync(
+      "sips",
+      ["-s", "format", "png", "-Z", String(PROMPT_THUMBNAIL_PX), imagePath, "--out", outPath],
+      { stdio: "ignore", timeout: 7000 },
+    );
+    const st = statSync(outPath);
+    if (!st.isFile() || st.size <= 0 || st.size > MAX_INLINE_PROMPT_IMAGE_BYTES) return null;
+    return { data: readFileSync(outPath).toString("base64"), mimeType: "image/png" };
+  } catch {
+    return null;
+  } finally {
+    try { unlinkSync(outPath); } catch {}
+  }
+}
+
+function makePromptThumbnailFromBase64(data: string, mimeType: string): IslandPromptImage | null {
+  if (process.platform !== "darwin") return null;
+
+  const inputPath = join(tmpdir(), `pi-island-src-${randomUUID()}${promptImageExtForMime(mimeType)}`);
+  try {
+    writeFileSync(inputPath, Buffer.from(cleanBase64ImageData(data), "base64"));
+    return makePromptThumbnailFromFile(inputPath);
+  } catch {
+    return null;
+  } finally {
+    try { unlinkSync(inputPath); } catch {}
+  }
+}
+
+function makePromptImageFromFile(imagePath: string, mimeType: string): IslandPromptImage | null {
+  const st = statSync(imagePath);
+  if (!st.isFile() || st.size <= 0 || st.size > MAX_PROMPT_IMAGE_SOURCE_BYTES) return null;
+
+  const thumbnail = makePromptThumbnailFromFile(imagePath);
+  if (thumbnail) return thumbnail;
+
+  if (st.size <= MAX_INLINE_PROMPT_IMAGE_BYTES) {
+    return { data: readFileSync(imagePath).toString("base64"), mimeType };
+  }
+  return null;
+}
+
+function makePromptImageFromBase64(data: string, mimeType: string): IslandPromptImage | null {
+  const bytes = base64ByteLength(data);
+  if (bytes <= 0 || bytes > MAX_PROMPT_IMAGE_SOURCE_BYTES) return null;
+
+  if (bytes <= MAX_INLINE_PROMPT_IMAGE_BYTES) {
+    return { data: cleanBase64ImageData(data), mimeType };
+  }
+  return makePromptThumbnailFromBase64(data, mimeType);
+}
+
+function stripTrailingPathPunctuation(raw: string): string {
+  let s = raw.trim();
+  while (s && /[),.;:!?}\]]$/.test(s) && !promptImageMimeForPath(s)) {
+    s = s.slice(0, -1).trimEnd();
+  }
+  return s;
+}
+
+function unescapeShellPath(s: string): string {
+  // POSIX prompts often contain shell-escaped spaces, e.g.
+  // /Users/me/Desktop/Screen\ Shot.png. On Windows, backslashes are path
+  // separators, so leave native drive/UNC paths alone.
+  if (process.platform === "win32" && (/^[A-Za-z]:[\\/]/.test(s) || /^\\\\/.test(s))) {
+    return s;
+  }
+  return s.replace(/\\([ \t\\'"`$&|;()<>\[\]{}!*?#])/g, "$1");
+}
+
+function normalizePromptImagePath(raw: string): string | null {
+  let s = stripTrailingPathPunctuation(raw);
+  if (!s) return null;
+
+  try {
+    if (/^file:\/\//i.test(s)) s = fileURLToPath(s);
+  } catch {
+    return null;
+  }
+
+  s = unescapeShellPath(stripTrailingPathPunctuation(s));
+  if (s.startsWith("~/") || s.startsWith("~\\")) {
+    s = join(homedir(), s.slice(2));
+  }
+
+  if (!isAbsolute(s)) return null;
+  return promptImageMimeForFile(s) ? s : null;
+}
+
+function extractPromptImagePaths(prompt: string): string[] {
+  const text = String(prompt || "");
+  if (!text) return [];
+
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  const add = (candidate: string) => {
+    const path = normalizePromptImagePath(candidate);
+    if (!path || seen.has(path)) return;
+    seen.add(path);
+    paths.push(path);
+  };
+
+  // Quoted paths may contain spaces.
+  const quotedRe = /"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`/g;
+  let match: RegExpExecArray | null;
+  while ((match = quotedRe.exec(text))) {
+    add(match[1] ?? match[2] ?? match[3] ?? "");
+  }
+
+  // Unquoted paths copied from Finder / Terminal often contain literal spaces
+  // (for example "Screen Shot 2026-...png") and are not shell-escaped. Match
+  // from a path-looking prefix through a known image extension before falling
+  // back to whitespace-delimited candidates.
+  const extAlternation = Object.keys(IMAGE_MIME_BY_EXT)
+    .map((ext) => ext.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .sort((a, b) => b.length - a.length)
+    .join("|");
+  const unquotedImagePathRe = new RegExp(
+    String.raw`(^|[\s"'\`<(])((?:file:\/\/|~[\\/]|\/|[A-Za-z]:[\\/]|\\\\)[^"'\`<>\r\n]*?\.(?:${extAlternation})(?=$|[\s"'\`<>),.;:!?}\]]))`,
+    "gi",
+  );
+  while ((match = unquotedImagePathRe.exec(text))) {
+    add(match[2] ?? "");
+  }
+
+  // Unquoted absolute paths / file URLs. POSIX shell-escaped spaces are
+  // kept as part of the candidate via the \\\s alternative. This also catches
+  // extensionless temp files when they are whitespace-delimited.
+  const unquotedRe = /(?:file:\/\/[^\s"'`<>]+|~\/(?:\\\s|[^\s"'`<>])+|\/(?:\\\s|[^\s"'`<>])+|[A-Za-z]:[\\/][^\s"'`<>]+|\\\\[^\s"'`<>]+)/g;
+  while ((match = unquotedRe.exec(text))) {
+    add(match[0]);
+  }
+
+  return paths.slice(0, MAX_PROMPT_IMAGE_PATHS);
+}
+
+function normalizePromptImageObject(img: any): IslandPromptImage | null {
+  if (!img || img.type !== "image") return null;
+
+  const directData = typeof img.data === "string" ? img.data : undefined;
+  const directMime = typeof img.mimeType === "string" ? img.mimeType : undefined;
+  if (directData && directMime?.toLowerCase().startsWith("image/")) {
+    return makePromptImageFromBase64(directData, directMime);
+  }
+
+  const source = img.source;
+  const sourceData = typeof source?.data === "string" ? source.data : undefined;
+  const sourceMime =
+    typeof source?.mediaType === "string" ? source.mediaType :
+    typeof source?.media_type === "string" ? source.media_type :
+    undefined;
+  if (source?.type === "base64" && sourceData && sourceMime?.toLowerCase().startsWith("image/")) {
+    return makePromptImageFromBase64(sourceData, sourceMime);
+  }
+
+  return null;
+}
+
+function normalizePromptImages(images: any, prompt = ""): { images: IslandPromptImage[]; count: number } {
+  const normalized: IslandPromptImage[] = [];
+  let count = 0;
+
+  const addImage = (img: IslandPromptImage) => {
+    count++;
+    if (normalized.length < MAX_PROMPT_IMAGES) normalized.push(img);
+  };
+
+  if (Array.isArray(images)) {
+    for (const img of images) {
+      const image = normalizePromptImageObject(img);
+      if (image) addImage(image);
+    }
+  }
+
+  for (const imagePath of extractPromptImagePaths(prompt)) {
+    const mimeType = promptImageMimeForFile(imagePath);
+    if (!mimeType) continue;
+    try {
+      const image = makePromptImageFromFile(imagePath, mimeType);
+      if (!image) continue;
+      count++;
+      if (normalized.length < MAX_PROMPT_IMAGES) normalized.push(image);
+    } catch { /* Ignore paths that disappeared or are unreadable. */ }
+  }
+
+  return { images: normalized, count };
 }
 
 // Project names come from `basename(process.cwd())` — usually short
@@ -199,6 +522,7 @@ export default function (pi: ExtensionAPI) {
   let currentScale:     Scale      = pref.scale;
   let currentScreen:    ScreenPref = pref.screen;
   let currentNotchMode: NotchMode  = pref.notchMode;
+  let currentPromptHover = pref.promptHover;
   let hideTimer: NodeJS.Timeout | null = null;
 
   const project = truncateProject(basename(process.cwd()));
@@ -206,6 +530,8 @@ export default function (pi: ExtensionAPI) {
   let activeToolCount = 0;
   let inAgent = false;
   let currentPrompt = "";
+  let currentPromptImages: IslandPromptImage[] = [];
+  let currentPromptImageCount = 0;
   let startedAt: number | null = null;
   let frozenElapsed: number | null = null;
 
@@ -215,6 +541,7 @@ export default function (pi: ExtensionAPI) {
       scale:       currentScale,
       screen:      currentScreen,
       notchMode:   currentNotchMode,
+      promptHover: currentPromptHover,
       lastVersion: EXTENSION_VERSION,
     });
   }
@@ -331,6 +658,13 @@ export default function (pi: ExtensionAPI) {
     writeMessage({ id: SESSION_ID, type: "scale", scale: currentScale });
   }
 
+  // Prompt reveal is live and global to the shared capsule. The prompt is
+  // hidden from the compact row by default; this controls whether hovering
+  // the row expands a small prompt preview beneath it.
+  function syncPromptHover() {
+    writeMessage({ id: SESSION_ID, type: "prompt-hover", enabled: currentPromptHover });
+  }
+
   async function ensureConnection(): Promise<boolean> {
     if (sock && !sock.destroyed) return true;
     if (connecting) return false;
@@ -344,6 +678,7 @@ export default function (pi: ExtensionAPI) {
         // ghost rows stick around" fix.
         if (await versionHandshake()) {
           syncScale();
+          syncPromptHover();
           return true;
         }
         await forceRespawn();
@@ -367,6 +702,7 @@ export default function (pi: ExtensionAPI) {
           // (catches the "wrong binary on PATH" failure mode).
           if (await versionHandshake()) {
             syncScale();
+            syncPromptHover();
             return true;
           }
           // If even a freshly-spawned companion disagrees, give up
@@ -387,8 +723,13 @@ export default function (pi: ExtensionAPI) {
 
   async function sendUpdate(status: string, detail = "", opts: { resetTimer?: boolean } = {}) {
     if (!shownForSession) return;
-    if (!sock) { if (!(await ensureConnection())) return; }
-    if (opts.resetTimer || startedAt == null) {
+    let refreshedConnection = false;
+    if (!sock || sock.destroyed) {
+      if (!(await ensureConnection())) return;
+      refreshedConnection = true;
+    }
+    const resetForTurn = opts.resetTimer || startedAt == null;
+    if (resetForTurn) {
       startedAt = Date.now();
       frozenElapsed = null;
     }
@@ -397,17 +738,24 @@ export default function (pi: ExtensionAPI) {
       const usage = lastCtx?.getContextUsage?.();
       if (usage && usage.percent != null) ctxPct = Math.round(usage.percent);
     } catch {}
-    writeMessage({
+    const msg: any = {
       id: SESSION_ID,
       type: "update",
       project,
       status,
       detail,
-      prompt: currentPrompt,
       startedAt,
       frozenElapsed,
       ctxPct,
-    });
+    };
+    // Images can be large, so send the prompt payload only at turn start
+    // (or after reconnect). The WebView merges later partial updates.
+    if (resetForTurn || refreshedConnection) {
+      msg.prompt = currentPrompt;
+      msg.promptImages = currentPromptImages;
+      msg.promptImageCount = currentPromptImageCount;
+    }
+    writeMessage(msg);
   }
 
   async function sendRemove() {
@@ -497,6 +845,18 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.notify(`Island notch wrap → ${next}`, "info");
   }
 
+  async function doSetPromptHover(next: boolean, ctx: any) {
+    currentPromptHover = next;
+    persistPref();
+    // Live CSS toggle — no companion/native host respawn needed.
+    if (sock && !sock.destroyed) {
+      syncPromptHover();
+    } else if (shownForSession) {
+      if (await ensureConnection()) syncPromptHover();
+    }
+    ctx.ui.notify(`Island prompt hover → ${next ? "enabled" : "disabled"}`, "info");
+  }
+
   // ── Settings menu — same UX as pi's /settings ────────────────────────────
   // Uses pi-tui's SettingsList component via ctx.ui.custom(). Each row
   // shows a label + current value; Enter/Space cycles through `values`.
@@ -517,7 +877,7 @@ export default function (pi: ExtensionAPI) {
   async function openSettingsMenu(ctx: any) {
     if (!ctx.hasUI) {
       ctx.ui.notify(
-        "Settings menu needs an interactive UI. Try /island size|screen|notch <value>",
+        "Settings menu needs an interactive UI. Try /island size|screen|notch|prompt <value>",
         "info",
       );
       return;
@@ -557,6 +917,13 @@ export default function (pi: ExtensionAPI) {
             currentValue: currentNotchMode,
             values: [...NOTCH_MODES],
           },
+          {
+            id: "promptHover",
+            label: "Prompt hover",
+            description: "Reveal the hidden user prompt when hovering a row",
+            currentValue: currentPromptHover ? "enabled" : "disabled",
+            values: ["enabled", "disabled"],
+          },
         ];
 
       const container = new Container();
@@ -581,6 +948,8 @@ export default function (pi: ExtensionAPI) {
               await doSetScreen(newValue, ctx);
             } else if (id === "notch" && isNotchMode(newValue)) {
               await doSetNotchMode(newValue, ctx);
+            } else if (id === "promptHover") {
+              await doSetPromptHover(newValue === "enabled", ctx);
             }
           })();
           list.updateValue(id, newValue);
@@ -621,7 +990,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (evt: any, ctx) => {
     lastCtx = ctx;
-    currentPrompt = truncatePrompt(evt?.prompt ?? "", 48);
+    const rawPrompt = String(evt?.prompt ?? "");
+    currentPrompt = normalizePrompt(rawPrompt);
+    const promptImages = normalizePromptImages(evt?.images, rawPrompt);
+    currentPromptImages = promptImages.images;
+    currentPromptImageCount = promptImages.count;
   });
 
   pi.on("agent_start", async (_evt, ctx) => {
@@ -666,9 +1039,11 @@ export default function (pi: ExtensionAPI) {
     inAgent = false;
     if (startedAt != null) frozenElapsed = Date.now() - startedAt;
     await sendUpdate("done", "");
-    // Retract the row 5s after done so the user can read the summary.
+    // Done rows are no longer hoverable; show the centered completion
+    // confirmation briefly, then retract before the stopped loader can linger.
     if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(async () => { await sendRemove(); }, 5000);
+    const hideDelay = currentPromptImageCount > 0 ? DONE_HIDE_WITH_IMAGES_MS : DONE_HIDE_MS;
+    hideTimer = setTimeout(async () => { await sendRemove(); }, hideDelay);
   });
 
   // ── /island command ──────────────────────────────────────────────────────
@@ -680,11 +1055,12 @@ export default function (pi: ExtensionAPI) {
   //   /island size <preset>     → set scale (small | medium | large)
   //   /island screen <value>    → set screen (primary | active | 2 | 3 ...)
   //   /island notch <mode>      → set notch wrap (auto | normal | notch)
+  //   /island prompt <on|off>   → reveal prompt on row hover
   //
   // Subcommands let power users / scripts skip the menu. With no args the
   // menu is the friendlier path — same UX as pi's own /settings.
   pi.registerCommand("island", {
-    description: "Open pi-island settings (or /island size|screen|notch <value>)",
+    description: "Open pi-island settings (or /island size|screen|notch|prompt <value>)",
     handler: async (args, ctx) => {
       const parts = String(args ?? "").trim().split(/\s+/).filter(Boolean);
       if (parts.length === 0) {
@@ -758,8 +1134,33 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      if (sub === "prompt" || sub === "prompt-hover" || sub === "prompthover") {
+        const next = parts[1]?.toLowerCase();
+        if (!next) {
+          ctx.ui.notify(
+            `Prompt hover: ${currentPromptHover ? "enabled" : "disabled"} — try /island prompt <on|off|toggle>`,
+            "info",
+          );
+          return;
+        }
+        if (next === "toggle") {
+          await doSetPromptHover(!currentPromptHover, ctx);
+          return;
+        }
+        const enabled = parseToggle(next);
+        if (enabled == null) {
+          ctx.ui.notify(
+            `Unknown prompt hover value "${next}". Use: on, off, enabled, disabled, or toggle`,
+            "error",
+          );
+          return;
+        }
+        await doSetPromptHover(enabled, ctx);
+        return;
+      }
+
       ctx.ui.notify(
-        `Unknown subcommand "${sub}". Try: /island (menu)  or  /island size|screen|notch|reload <value>`,
+        `Unknown subcommand "${sub}". Try: /island (menu)  or  /island size|screen|notch|prompt|reload <value>`,
         "error",
       );
     },

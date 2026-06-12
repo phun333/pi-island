@@ -326,6 +326,15 @@ try {
       `count=${htmlImg.count} images=${htmlImg.images.length} display=${htmlImgDisplay}`,
     );
 
+    const htmlImgPairedPrompt = `see <img src="${plainPath}" alt="paired img"></img> before fixing`;
+    const htmlImgPaired = mod.normalizePromptImages(undefined, htmlImgPairedPrompt);
+    const htmlImgPairedDisplay = displayFn(htmlImgPairedPrompt);
+    check(
+      "paired html img tag local src renders and removes closing tag clutter",
+      htmlImgPaired.count === 1 && htmlImgPaired.images.length === 1 && htmlImgPairedDisplay.includes("paired img") && !htmlImgPairedDisplay.includes("<img") && !htmlImgPairedDisplay.includes("</img>") && !htmlImgPairedDisplay.includes("src=") && !htmlImgPairedDisplay.includes(plainPath) && !htmlImgPairedDisplay.includes(basename(plainPath)),
+      `count=${htmlImgPaired.count} images=${htmlImgPaired.images.length} display=${htmlImgPairedDisplay}`,
+    );
+
     const htmlImgAltFirstPrompt = `see <img alt='space shot' src="${spacedPath}"> now`;
     const htmlImgAltFirst = mod.normalizePromptImages(undefined, htmlImgAltFirstPrompt);
     const htmlImgAltFirstDisplay = displayFn(htmlImgAltFirstPrompt);

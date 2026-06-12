@@ -550,10 +550,22 @@ function htmlAttrValue(tag: string, name: string): string | undefined {
   return match ? (match[1] ?? match[2] ?? match[3] ?? "") : undefined;
 }
 
+function htmlSrcsetHasLocalImage(srcset: string): boolean {
+  for (const item of String(srcset || "").split(",")) {
+    // Strip a simple srcset density/width descriptor ("1x", "2x", "640w")
+    // before resolving. URLs with spaces should be quoted/escaped in real HTML;
+    // this keeps the common single-candidate clipboard case lightweight.
+    const candidate = item.trim().replace(/\s+\d+(?:\.\d+)?[wx]\s*$/i, "").trim();
+    if (candidate && normalizePromptImagePath(candidate)) return true;
+  }
+  return false;
+}
+
 function normalizeHtmlLocalImageTagsForDisplay(prompt: string): string {
   return String(prompt || "").replace(/<img\b[^>]*>/gi, (raw) => {
-    const src = htmlAttrValue(raw, "src");
-    if (!src || !normalizePromptImagePath(src.trim())) return raw;
+    const src = htmlAttrValue(raw, "src")?.trim();
+    const srcset = htmlAttrValue(raw, "srcset")?.trim();
+    if (!((src && normalizePromptImagePath(src)) || (srcset && htmlSrcsetHasLocalImage(srcset)))) return raw;
     const alt = htmlAttrValue(raw, "alt")?.trim() ?? "";
     return alt ? ` ${alt} ` : " ";
   });

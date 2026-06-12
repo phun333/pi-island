@@ -244,6 +244,24 @@ try {
       `count=${htmlImgAltFirst.count} images=${htmlImgAltFirst.images.length} display=${htmlImgAltFirstDisplay}`,
     );
 
+    const htmlAnchorPrompt = `see <a href="${plainPath}">linked screenshot</a> before fixing`;
+    const htmlAnchor = mod.normalizePromptImages(undefined, htmlAnchorPrompt);
+    const htmlAnchorDisplay = displayFn(htmlAnchorPrompt);
+    check(
+      "html anchor local image href renders and leaves clean link text",
+      htmlAnchor.count === 1 && htmlAnchor.images.length === 1 && htmlAnchorDisplay.includes("linked screenshot") && !htmlAnchorDisplay.includes("<a") && !htmlAnchorDisplay.includes("href=") && !htmlAnchorDisplay.includes("</a>") && !htmlAnchorDisplay.includes(plainPath) && !htmlAnchorDisplay.includes(basename(plainPath)),
+      `count=${htmlAnchor.count} images=${htmlAnchor.images.length} display=${htmlAnchorDisplay}`,
+    );
+
+    const htmlAnchorFileUrlPrompt = `see <a href="${fileUrl}">space shot</a> now`;
+    const htmlAnchorFileUrl = mod.normalizePromptImages(undefined, htmlAnchorFileUrlPrompt);
+    const htmlAnchorFileUrlDisplay = displayFn(htmlAnchorFileUrlPrompt);
+    check(
+      "html anchor file URL image href renders and leaves clean link text",
+      htmlAnchorFileUrl.count === 1 && htmlAnchorFileUrl.images.length === 1 && htmlAnchorFileUrlDisplay.includes("space shot") && !htmlAnchorFileUrlDisplay.includes("<a") && !htmlAnchorFileUrlDisplay.includes("href=") && !htmlAnchorFileUrlDisplay.includes("</a>") && !htmlAnchorFileUrlDisplay.includes(fileUrl) && !htmlAnchorFileUrlDisplay.includes("Screen%20Shot"),
+      `count=${htmlAnchorFileUrl.count} images=${htmlAnchorFileUrl.images.length} display=${htmlAnchorFileUrlDisplay}`,
+    );
+
     const fileTagPrompt = `describe attached image\n<file name="${plainPath}"></file>\nplease inspect it`;
     const fileTagFallback = mod.normalizePromptImages(undefined, fileTagPrompt);
     check(

@@ -672,7 +672,7 @@ function normalizeHtmlLocalImageTagsForDisplay(prompt: string): string {
 }
 
 function normalizeHtmlLocalImageSourceTagsForDisplay(prompt: string): string {
-  return String(prompt || "").replace(/<source\b[^>]*>/gi, (raw) =>
+  return String(prompt || "").replace(/<source\b[^>]*>(?:\s*<\/source>)?/gi, (raw) =>
     htmlLocalImagePathsFromTag(raw).length > 0 ? " " : raw
   );
 }

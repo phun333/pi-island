@@ -559,7 +559,7 @@ function normalizePromptForDisplay(prompt: string): string {
     display = display.split(raw).join(" ");
   }
 
-  const rawPaths = [...new Set(extractPromptImagePathMatches(display).map((match) => match.raw).filter(Boolean))]
+  const rawPaths = [...new Set(extractPromptImagePathMatches(display, { dedupe: false }).map((match) => match.raw).filter(Boolean))]
     .sort((a, b) => b.length - a.length);
   for (const raw of rawPaths) {
     display = display.split(raw).join(" ");

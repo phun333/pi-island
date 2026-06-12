@@ -415,6 +415,19 @@ function unescapeShellPath(s: string): string {
   return s.replace(/\\+([ \t\\'"`$&|;()<>\[\]{}!*?#])/g, "$1");
 }
 
+function decodeHtmlEntities(s: string): string {
+  return String(s || "").replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (raw, entity) => {
+    const e = String(entity).toLowerCase();
+    if (e === "amp") return "&";
+    if (e === "lt") return "<";
+    if (e === "gt") return ">";
+    if (e === "quot") return '"';
+    if (e === "apos") return "'";
+    const code = e.startsWith("#x") ? parseInt(e.slice(2), 16) : e.startsWith("#") ? parseInt(e.slice(1), 10) : NaN;
+    return Number.isFinite(code) ? String.fromCodePoint(code) : raw;
+  });
+}
+
 function normalizePromptImagePath(raw: string): string | null {
   let s = stripTrailingPathPunctuation(raw);
   if (!s) return null;
@@ -445,14 +458,30 @@ function normalizePromptImagePath(raw: string): string | null {
   }
   const resolveExistingImage = (candidate: string): string | null => {
     if (promptImageMimeForFile(candidate)) return candidate;
+    const fallbacks: string[] = [];
     // Browser/rich clipboard text sometimes drops the file:// scheme but keeps
     // URL escapes (e.g. /tmp/Screen%20Shot.png). Prefer literal filenames first;
     // only fall back to decoding when the literal path did not resolve.
     if (candidate.includes("%")) {
       try {
         const decoded = decodeURI(candidate);
-        if (decoded !== candidate && promptImageMimeForFile(decoded)) return decoded;
+        if (decoded !== candidate) fallbacks.push(decoded);
       } catch { /* Invalid percent escapes: treat as a literal path. */ }
+    }
+    // HTML copied from browsers escapes attribute values, so local paths such as
+    // R&D Screen Shot.png may arrive as R&amp;D Screen Shot.png. Decode only as a
+    // fallback so literal filenames containing entity text still win.
+    const htmlDecoded = decodeHtmlEntities(candidate);
+    if (htmlDecoded !== candidate) fallbacks.push(htmlDecoded);
+    for (const fallback of [...fallbacks]) {
+      const decodedFallback = decodeHtmlEntities(fallback);
+      if (decodedFallback !== fallback) fallbacks.push(decodedFallback);
+    }
+    const seenFallbacks = new Set<string>();
+    for (const fallback of fallbacks) {
+      if (seenFallbacks.has(fallback)) continue;
+      seenFallbacks.add(fallback);
+      if (promptImageMimeForFile(fallback)) return fallback;
     }
     return null;
   };
@@ -596,7 +625,7 @@ function normalizeMarkdownLocalImageReferencesForDisplay(prompt: string): string
 
 function htmlAttrValue(tag: string, name: string): string | undefined {
   const match = tag.match(new RegExp(String.raw`\b${name}\s*=\s*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\s>]+))`, "i"));
-  return match ? (match[1] ?? match[2] ?? match[3] ?? "") : undefined;
+  return match ? decodeHtmlEntities(match[1] ?? match[2] ?? match[3] ?? "") : undefined;
 }
 
 function htmlSrcsetLocalImagePaths(srcset: string): string[] {

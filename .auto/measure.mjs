@@ -434,6 +434,15 @@ try {
       selfClosingFileTag.count === 1 && selfClosingFileTag.images.length === 1 && !selfClosingFileTagDisplay.includes("<file") && !selfClosingFileTagDisplay.includes("</file>") && !selfClosingFileTagDisplay.includes(plainPath) && !selfClosingFileTagDisplay.includes(basename(plainPath)) && selfClosingFileTagDisplay.includes("describe self-closing image") && selfClosingFileTagDisplay.includes("please inspect it"),
       `count=${selfClosingFileTag.count} images=${selfClosingFileTag.images.length} display=${selfClosingFileTagDisplay}`,
     );
+
+    const reorderedFileTagPrompt = `describe file metadata\n<file type="image/png" name="${plainPath}"></file>\nplease inspect it`;
+    const reorderedFileTag = mod.normalizePromptImages(undefined, reorderedFileTagPrompt);
+    const reorderedFileTagDisplay = displayFn(reorderedFileTagPrompt);
+    check(
+      "image CLI file tag with attributes before name renders and hides whole marker",
+      reorderedFileTag.count === 1 && reorderedFileTag.images.length === 1 && !reorderedFileTagDisplay.includes("<file") && !reorderedFileTagDisplay.includes("</file>") && !reorderedFileTagDisplay.includes("type=") && !reorderedFileTagDisplay.includes(plainPath) && !reorderedFileTagDisplay.includes(basename(plainPath)) && reorderedFileTagDisplay.includes("describe file metadata") && reorderedFileTagDisplay.includes("please inspect it"),
+      `count=${reorderedFileTag.count} images=${reorderedFileTag.images.length} display=${reorderedFileTagDisplay}`,
+    );
   } else {
     check("display prompt hides local image path text but keeps surrounding words", false, "normalizePromptForDisplay missing");
   }

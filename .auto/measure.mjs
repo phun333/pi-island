@@ -424,6 +424,15 @@ try {
       `count=${htmlEscapedImg.count} images=${htmlEscapedImg.images.length} display=${htmlEscapedImgDisplay}`,
     );
 
+    const htmlSvgImagePrompt = `see <svg viewBox="0 0 1 1"><image href="${plainPath}" /></svg> now`;
+    const htmlSvgImage = mod.normalizePromptImages(undefined, htmlSvgImagePrompt);
+    const htmlSvgImageDisplay = displayFn(htmlSvgImagePrompt);
+    check(
+      "html svg image href renders and removes svg image markup",
+      htmlSvgImage.count === 1 && htmlSvgImage.images.length === 1 && !htmlSvgImageDisplay.includes("<svg") && !htmlSvgImageDisplay.includes("</svg>") && !htmlSvgImageDisplay.includes("<image") && !htmlSvgImageDisplay.includes("href=") && !htmlSvgImageDisplay.includes(plainPath) && !htmlSvgImageDisplay.includes(basename(plainPath)),
+      `count=${htmlSvgImage.count} images=${htmlSvgImage.images.length} display=${htmlSvgImageDisplay}`,
+    );
+
     const htmlImgSrcsetPrompt = `see <img srcset="${plainPath} 1x" alt="bug srcset"> before fixing`;
     const htmlImgSrcset = mod.normalizePromptImages(undefined, htmlImgSrcsetPrompt);
     const htmlImgSrcsetDisplay = displayFn(htmlImgSrcsetPrompt);

@@ -411,7 +411,28 @@ function normalizePromptImagePath(raw: string): string | null {
   return promptImageMimeForFile(s) ? s : null;
 }
 
-type PromptImagePathMatch = { raw: string; path: string };
+type PromptImagePathMatch = { raw: string; path: string; index: number };
+type PromptImageFileTagMatch = { raw: string; path: string; index: number; end: number };
+
+function extractPromptImageFileTagMatches(prompt: string): PromptImageFileTagMatch[] {
+  const text = String(prompt || "");
+  if (!text) return [];
+
+  const matches: PromptImageFileTagMatch[] = [];
+  const seen = new Set<string>();
+  const fileTagRe = /<file\s+name=(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s>]+))[^>]*>[\s\S]*?<\/file>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fileTagRe.exec(text))) {
+    const candidate = match[1] ?? match[2] ?? match[3] ?? "";
+    const path = normalizePromptImagePath(candidate);
+    if (!path) continue;
+    const key = `${match.index}:${path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    matches.push({ raw: match[0], path, index: match.index, end: match.index + match[0].length });
+  }
+  return matches;
+}
 
 function extractPromptImagePathMatches(prompt: string): PromptImagePathMatch[] {
   const text = String(prompt || "");
@@ -419,14 +440,14 @@ function extractPromptImagePathMatches(prompt: string): PromptImagePathMatch[] {
 
   const matches: PromptImagePathMatch[] = [];
   const seen = new Set<string>();
-  const add = (candidate: string, raw = candidate): boolean => {
+  const add = (candidate: string, raw = candidate, index = -1): boolean => {
     const path = normalizePromptImagePath(candidate);
     if (!path) return false;
     // Return true for duplicates too: the caller found a real path and should
     // not keep walking inward to shorter suffixes like /image.png.
     if (seen.has(path)) return true;
     seen.add(path);
-    matches.push({ raw, path });
+    matches.push({ raw, path, index });
     return true;
   };
 
@@ -435,7 +456,7 @@ function extractPromptImagePathMatches(prompt: string): PromptImagePathMatch[] {
   const quotedRe = /"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`/g;
   let match: RegExpExecArray | null;
   while ((match = quotedRe.exec(text))) {
-    add(match[1] ?? match[2] ?? match[3] ?? "", match[0]);
+    add(match[1] ?? match[2] ?? match[3] ?? "", match[0], match.index);
   }
 
   const extAlternation = Object.keys(IMAGE_MIME_BY_EXT)
@@ -464,7 +485,7 @@ function extractPromptImagePathMatches(prompt: string): PromptImagePathMatch[] {
       starts.push(lineStart + prefix.index);
     }
     for (const start of starts) {
-      if (add(text.slice(start, end))) break;
+      if (add(text.slice(start, end), text.slice(start, end), start)) break;
     }
   }
 
@@ -473,7 +494,7 @@ function extractPromptImagePathMatches(prompt: string): PromptImagePathMatch[] {
   // extensionless temp files when they are whitespace-delimited.
   const unquotedRe = /(?:file:\/\/[^\s"'`<>]+|~\/(?:\\\s|[^\s"'`<>])+|\/(?:\\\s|[^\s"'`<>])+|[A-Za-z]:[\\/][^\s"'`<>]+|\\\\[^\s"'`<>]+)/g;
   while ((match = unquotedRe.exec(text))) {
-    add(match[0]);
+    add(match[0], match[0], match.index);
   }
 
   return matches.slice(0, MAX_PROMPT_IMAGE_PATHS);
@@ -485,6 +506,17 @@ function extractPromptImagePaths(prompt: string): string[] {
 
 function normalizePromptForDisplay(prompt: string): string {
   let display = String(prompt || "");
+
+  // pi's CLI file-argument flow represents attached images as both an
+  // ImageContent payload and a lightweight <file name="/path/image.png"> tag
+  // in the prompt text. Once we render a thumbnail, that XML-ish marker is UI
+  // noise; remove the whole image tag instead of leaving <file name= ></file>.
+  const rawFileTags = [...new Set(extractPromptImageFileTagMatches(display).map((match) => match.raw).filter(Boolean))]
+    .sort((a, b) => b.length - a.length);
+  for (const raw of rawFileTags) {
+    display = display.split(raw).join(" ");
+  }
+
   const rawPaths = [...new Set(extractPromptImagePathMatches(display).map((match) => match.raw).filter(Boolean))]
     .sort((a, b) => b.length - a.length);
   for (const raw of rawPaths) {
@@ -531,7 +563,20 @@ function normalizePromptImages(images: any, prompt = ""): { images: IslandPrompt
     }
   }
 
-  for (const imagePath of extractPromptImagePaths(prompt)) {
+  const directImageCount = count;
+  const fileTagMatches = directImageCount > 0 ? extractPromptImageFileTagMatches(prompt) : [];
+  let fileTagSkipsRemaining = Math.min(directImageCount, fileTagMatches.length);
+
+  for (const match of extractPromptImagePathMatches(prompt)) {
+    const imagePath = match.path;
+    const isFileTagPath = fileTagSkipsRemaining > 0 && fileTagMatches.some((tag) =>
+      tag.path === imagePath && match.index >= tag.index && match.index < tag.end
+    );
+    if (isFileTagPath) {
+      fileTagSkipsRemaining--;
+      continue;
+    }
+
     const mimeType = promptImageMimeForFile(imagePath);
     if (!mimeType) continue;
     try {

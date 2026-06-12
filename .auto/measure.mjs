@@ -174,6 +174,15 @@ try {
       `count=${directPlusDifferentRaw.count} images=${directPlusDifferentRaw.images.length} display=${directPlusDifferentRawDisplay}`,
     );
 
+    const directPlusSameContentRawCopiesPrompt = `direct pasted image also mentions duplicate temp files ${plainPath} and ${spacedPath}`;
+    const directPlusSameContentRawCopies = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], directPlusSameContentRawCopiesPrompt);
+    const directPlusSameContentRawCopiesDisplay = displayFn(directPlusSameContentRawCopiesPrompt);
+    check(
+      "direct image plus multiple same-content raw local paths de-dupes all fallback thumbnails",
+      directPlusSameContentRawCopies.count === 1 && directPlusSameContentRawCopies.images.length === 1 && !directPlusSameContentRawCopiesDisplay.includes(plainPath) && !directPlusSameContentRawCopiesDisplay.includes(spacedPath) && !directPlusSameContentRawCopiesDisplay.includes(basename(plainPath)) && !directPlusSameContentRawCopiesDisplay.includes(basename(spacedPath)),
+      `count=${directPlusSameContentRawCopies.count} images=${directPlusSameContentRawCopies.images.length} display=${directPlusSameContentRawCopiesDisplay}`,
+    );
+
     const relativePlainPath = relative(ROOT, plainPath);
     const relativePathImages = mod.normalizePromptImages(undefined, `relative screenshot ${relativePlainPath} should render`);
     const relativePathDisplay = displayFn(`relative screenshot ${relativePlainPath} should render`);

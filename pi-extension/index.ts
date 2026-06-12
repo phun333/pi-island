@@ -18,7 +18,7 @@ import { Container, SettingsList, type SettingItem } from "@mariozechner/pi-tui"
 import { connect, type Socket } from "node:net";
 import { spawn, execSync, execFileSync } from "node:child_process";
 import { basename, join, dirname, extname, isAbsolute, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -315,6 +315,29 @@ function base64ByteLength(data: string): number {
   if (!clean) return 0;
   const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
   return Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
+}
+
+function promptImageBytesHash(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function promptImageHashFromBase64(data: string): string | null {
+  try {
+    const bytes = Buffer.from(cleanBase64ImageData(data), "base64");
+    return bytes.length > 0 && bytes.length <= MAX_PROMPT_IMAGE_SOURCE_BYTES ? promptImageBytesHash(bytes) : null;
+  } catch {
+    return null;
+  }
+}
+
+function promptImageHashFromFile(imagePath: string): string | null {
+  try {
+    const st = statSync(imagePath);
+    if (!st.isFile() || st.size <= 0 || st.size > MAX_PROMPT_IMAGE_SOURCE_BYTES) return null;
+    return promptImageBytesHash(readFileSync(imagePath));
+  } catch {
+    return null;
+  }
 }
 
 function makePromptThumbnailFromFile(imagePath: string): IslandPromptImage | null {
@@ -717,6 +740,28 @@ function normalizePromptForDisplay(prompt: string): string {
   return normalizePrompt(display.replace(/\s+([,.;:!?])/g, "$1"));
 }
 
+function promptImageHashFromObject(img: any): string | null {
+  if (!img || img.type !== "image") return null;
+
+  const directData = typeof img.data === "string" ? img.data : undefined;
+  const directMime = typeof img.mimeType === "string" ? img.mimeType : undefined;
+  if (directData && directMime?.toLowerCase().startsWith("image/")) {
+    return promptImageHashFromBase64(directData);
+  }
+
+  const source = img.source;
+  const sourceData = typeof source?.data === "string" ? source.data : undefined;
+  const sourceMime =
+    typeof source?.mediaType === "string" ? source.mediaType :
+    typeof source?.media_type === "string" ? source.media_type :
+    undefined;
+  if (source?.type === "base64" && sourceData && sourceMime?.toLowerCase().startsWith("image/")) {
+    return promptImageHashFromBase64(sourceData);
+  }
+
+  return null;
+}
+
 function normalizePromptImageObject(img: any): IslandPromptImage | null {
   if (!img || img.type !== "image") return null;
 
@@ -741,33 +786,43 @@ function normalizePromptImageObject(img: any): IslandPromptImage | null {
 
 function normalizePromptImages(images: any, prompt = ""): { images: IslandPromptImage[]; count: number } {
   const normalized: IslandPromptImage[] = [];
+  const directImageHashes = new Map<string, number>();
   let count = 0;
 
   const addImage = (img: IslandPromptImage) => {
     count++;
     if (normalized.length < MAX_PROMPT_IMAGES) normalized.push(img);
   };
+  const addDirectImageHash = (hash: string | null) => {
+    if (!hash) return;
+    directImageHashes.set(hash, (directImageHashes.get(hash) ?? 0) + 1);
+  };
 
   if (Array.isArray(images)) {
     for (const img of images) {
       const image = normalizePromptImageObject(img);
-      if (image) addImage(image);
+      if (image) {
+        addImage(image);
+        addDirectImageHash(promptImageHashFromObject(img));
+      }
     }
   }
 
-  const directImageCount = count;
-  const fileTagMatches = directImageCount > 0 ? extractPromptImageFileTagMatches(prompt) : [];
-  let fileTagSkipsRemaining = Math.min(directImageCount, fileTagMatches.length);
+  const fileTagMatches = directImageHashes.size > 0 ? extractPromptImageFileTagMatches(prompt) : [];
   const htmlImageGroups = extractHtmlImageCandidateGroups(prompt);
 
   for (const match of extractPromptImagePathMatches(prompt)) {
     const imagePath = match.path;
-    const isFileTagPath = fileTagSkipsRemaining > 0 && fileTagMatches.some((tag) =>
+    const fileTagMatch = fileTagMatches.find((tag) =>
       tag.path === imagePath && match.index >= tag.index && match.index < tag.end
     );
-    if (isFileTagPath) {
-      fileTagSkipsRemaining--;
-      continue;
+    if (fileTagMatch) {
+      const hash = promptImageHashFromFile(imagePath);
+      const remainingDirectMatches = hash ? (directImageHashes.get(hash) ?? 0) : 0;
+      if (hash && remainingDirectMatches > 0) {
+        directImageHashes.set(hash, remainingDirectMatches - 1);
+        continue;
+      }
     }
 
     const htmlGroup = htmlImageGroups.find((group) =>

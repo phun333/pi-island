@@ -389,7 +389,7 @@ function unescapeShellPath(s: string): string {
   if (process.platform === "win32" && (/^[A-Za-z]:[\\/]/.test(s) || /^\\\\/.test(s))) {
     return s;
   }
-  return s.replace(/\\([ \t\\'"`$&|;()<>\[\]{}!*?#])/g, "$1");
+  return s.replace(/\\+([ \t\\'"`$&|;()<>\[\]{}!*?#])/g, "$1");
 }
 
 function normalizePromptImagePath(raw: string): string | null {

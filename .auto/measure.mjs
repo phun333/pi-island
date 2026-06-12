@@ -167,6 +167,15 @@ try {
       `count=${markdownLinkImage.count} images=${markdownLinkImage.images.length} display=${markdownLinkDisplay}`,
     );
 
+    const duplicateMarkdownPrompt = `compare ![before](${plainPath}) and ![after](${plainPath})`;
+    const duplicateMarkdownImage = mod.normalizePromptImages(undefined, duplicateMarkdownPrompt);
+    const duplicateMarkdownDisplay = displayFn(duplicateMarkdownPrompt);
+    check(
+      "duplicate markdown refs to same local image clean all wrappers without duplicate thumbnails",
+      duplicateMarkdownImage.count === 1 && duplicateMarkdownImage.images.length === 1 && duplicateMarkdownDisplay.includes("before") && duplicateMarkdownDisplay.includes("after") && !duplicateMarkdownDisplay.includes("![") && !duplicateMarkdownDisplay.includes("](") && !duplicateMarkdownDisplay.includes(plainPath) && !duplicateMarkdownDisplay.includes(basename(plainPath)),
+      `count=${duplicateMarkdownImage.count} images=${duplicateMarkdownImage.images.length} display=${duplicateMarkdownDisplay}`,
+    );
+
     const fileTagPrompt = `describe attached image\n<file name="${plainPath}"></file>\nplease inspect it`;
     const fileTagFallback = mod.normalizePromptImages(undefined, fileTagPrompt);
     check(

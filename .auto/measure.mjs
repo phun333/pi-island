@@ -425,6 +425,15 @@ try {
       !fileTagDisplay.includes("<file") && !fileTagDisplay.includes("</file>") && !fileTagDisplay.includes(plainPath) && !fileTagDisplay.includes(basename(plainPath)) && fileTagDisplay.includes("describe attached image") && fileTagDisplay.includes("please inspect it"),
       fileTagDisplay,
     );
+
+    const selfClosingFileTagPrompt = `describe self-closing image\n<file name="${plainPath}" />\nplease inspect it`;
+    const selfClosingFileTag = mod.normalizePromptImages(undefined, selfClosingFileTagPrompt);
+    const selfClosingFileTagDisplay = displayFn(selfClosingFileTagPrompt);
+    check(
+      "self-closing image CLI file tag renders and is hidden from display prompt",
+      selfClosingFileTag.count === 1 && selfClosingFileTag.images.length === 1 && !selfClosingFileTagDisplay.includes("<file") && !selfClosingFileTagDisplay.includes("</file>") && !selfClosingFileTagDisplay.includes(plainPath) && !selfClosingFileTagDisplay.includes(basename(plainPath)) && selfClosingFileTagDisplay.includes("describe self-closing image") && selfClosingFileTagDisplay.includes("please inspect it"),
+      `count=${selfClosingFileTag.count} images=${selfClosingFileTag.images.length} display=${selfClosingFileTagDisplay}`,
+    );
   } else {
     check("display prompt hides local image path text but keeps surrounding words", false, "normalizePromptForDisplay missing");
   }

@@ -420,16 +420,28 @@ function normalizePromptImagePath(raw: string): string | null {
     if (!/^\.\.?[\\/]/.test(s)) return null;
     s = resolve(process.cwd(), s);
   }
-  if (promptImageMimeForFile(s)) return s;
-  // Browser/rich clipboard text sometimes drops the file:// scheme but keeps
-  // URL escapes (e.g. /tmp/Screen%20Shot.png). Prefer literal filenames first;
-  // only fall back to decoding when the literal path did not resolve.
-  if (s.includes("%")) {
-    try {
-      const decoded = decodeURI(s);
-      if (decoded !== s && promptImageMimeForFile(decoded)) return decoded;
-    } catch { /* Invalid percent escapes: treat as a literal path. */ }
-  }
+  const resolveExistingImage = (candidate: string): string | null => {
+    if (promptImageMimeForFile(candidate)) return candidate;
+    // Browser/rich clipboard text sometimes drops the file:// scheme but keeps
+    // URL escapes (e.g. /tmp/Screen%20Shot.png). Prefer literal filenames first;
+    // only fall back to decoding when the literal path did not resolve.
+    if (candidate.includes("%")) {
+      try {
+        const decoded = decodeURI(candidate);
+        if (decoded !== candidate && promptImageMimeForFile(decoded)) return decoded;
+      } catch { /* Invalid percent escapes: treat as a literal path. */ }
+    }
+    return null;
+  };
+
+  const literal = resolveExistingImage(s);
+  if (literal) return literal;
+
+  // URL-ish local paths may carry cache-busting query/fragment suffixes. Try
+  // the base path only after literal lookup so real filenames containing ?/#
+  // still win when they exist.
+  const suffixAt = s.search(/[?#]/);
+  if (suffixAt > 0) return resolveExistingImage(s.slice(0, suffixAt));
   return null;
 }
 
@@ -511,8 +523,10 @@ function extractPromptImagePathMatches(prompt: string, opts: { dedupe?: boolean 
     while ((prefix = pathPrefixRe.exec(linePrefix))) {
       starts.push(lineStart + prefix.index);
     }
+    const suffix = text.slice(end).match(/^[?#][^\s"'`<>),;\]}]*/)?.[0] ?? "";
+    const rawEnd = end + suffix.length;
     for (const start of starts) {
-      if (add(text.slice(start, end), text.slice(start, end), start)) break;
+      if (add(text.slice(start, end), text.slice(start, rawEnd), start)) break;
     }
   }
 

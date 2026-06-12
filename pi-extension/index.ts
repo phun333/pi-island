@@ -809,18 +809,14 @@ function normalizePromptImages(images: any, prompt = ""): { images: IslandPrompt
   }
 
   const htmlImageGroups = extractHtmlImageCandidateGroups(prompt);
-  const consumeDirectImageMatchForFile = (imagePath: string): boolean => {
+  const hasDirectImageMatchForFile = (imagePath: string): boolean => {
     if (directImageHashes.size === 0) return false;
     const hash = promptImageHashFromFile(imagePath);
-    const remainingDirectMatches = hash ? (directImageHashes.get(hash) ?? 0) : 0;
-    if (!hash || remainingDirectMatches <= 0) return false;
-    if (remainingDirectMatches === 1) directImageHashes.delete(hash);
-    else directImageHashes.set(hash, remainingDirectMatches - 1);
-    return true;
+    return !!hash && (directImageHashes.get(hash) ?? 0) > 0;
   };
-  const consumeDirectImageMatchForFiles = (imagePaths: string[]): boolean => {
+  const hasDirectImageMatchForFiles = (imagePaths: string[]): boolean => {
     for (const imagePath of imagePaths) {
-      if (consumeDirectImageMatchForFile(imagePath)) return true;
+      if (hasDirectImageMatchForFile(imagePath)) return true;
     }
     return false;
   };
@@ -833,8 +829,8 @@ function normalizePromptImages(images: any, prompt = ""): { images: IslandPrompt
     if (htmlGroup) {
       if (htmlGroup.kept) continue;
       htmlGroup.kept = true;
-      if (consumeDirectImageMatchForFiles(htmlGroup.paths)) continue;
-    } else if (consumeDirectImageMatchForFile(imagePath)) {
+      if (hasDirectImageMatchForFiles(htmlGroup.paths)) continue;
+    } else if (hasDirectImageMatchForFile(imagePath)) {
       continue;
     }
 

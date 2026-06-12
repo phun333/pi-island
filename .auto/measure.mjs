@@ -244,6 +244,15 @@ try {
       `count=${htmlImgAltFirst.count} images=${htmlImgAltFirst.images.length} display=${htmlImgAltFirstDisplay}`,
     );
 
+    const htmlImgSrcsetPrompt = `see <img srcset="${plainPath} 1x" alt="bug srcset"> before fixing`;
+    const htmlImgSrcset = mod.normalizePromptImages(undefined, htmlImgSrcsetPrompt);
+    const htmlImgSrcsetDisplay = displayFn(htmlImgSrcsetPrompt);
+    check(
+      "html img srcset local image renders and leaves clean alt text",
+      htmlImgSrcset.count === 1 && htmlImgSrcset.images.length === 1 && htmlImgSrcsetDisplay.includes("bug srcset") && !htmlImgSrcsetDisplay.includes("<img") && !htmlImgSrcsetDisplay.includes("srcset=") && !htmlImgSrcsetDisplay.includes(plainPath) && !htmlImgSrcsetDisplay.includes(basename(plainPath)),
+      `count=${htmlImgSrcset.count} images=${htmlImgSrcset.images.length} display=${htmlImgSrcsetDisplay}`,
+    );
+
     const htmlAnchorPrompt = `see <a href="${plainPath}">linked screenshot</a> before fixing`;
     const htmlAnchor = mod.normalizePromptImages(undefined, htmlAnchorPrompt);
     const htmlAnchorDisplay = displayFn(htmlAnchorPrompt);

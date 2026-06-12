@@ -116,6 +116,15 @@ try {
       `count=${fileUrlImages.count} images=${fileUrlImages.images.length} display=${fileUrlDisplay}`,
     );
 
+    const percentEncodedPath = spacedPath.replace(/ /g, "%20");
+    const percentEncodedImages = mod.normalizePromptImages(undefined, `encoded local path ${percentEncodedPath} should render`);
+    const percentEncodedDisplay = displayFn(`encoded local path ${percentEncodedPath} should render`);
+    check(
+      "percent-encoded local image path renders and is hidden from display prompt",
+      percentEncodedImages.count === 1 && percentEncodedImages.images.length === 1 && !percentEncodedDisplay.includes(percentEncodedPath) && !percentEncodedDisplay.includes("Screen%20Shot") && !percentEncodedDisplay.includes(basename(spacedPath)),
+      `count=${percentEncodedImages.count} images=${percentEncodedImages.images.length} display=${percentEncodedDisplay}`,
+    );
+
     const shellEscapedPath = spacedPath.replace(/ /g, "\\\\ ");
     const shellEscapedImages = mod.normalizePromptImages(undefined, `shell pasted ${shellEscapedPath} should render`);
     const shellEscapedDisplay = displayFn(`shell pasted ${shellEscapedPath} should render`);

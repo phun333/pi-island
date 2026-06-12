@@ -299,6 +299,15 @@ try {
       `count=${markdownLinkImage.count} images=${markdownLinkImage.images.length} display=${markdownLinkDisplay}`,
     );
 
+    const markdownEscapedPrompt = `see ![R&amp;D screenshot](${ampPath.replace(/&/g, "&amp;")}) before fixing`;
+    const markdownEscapedImage = mod.normalizePromptImages(undefined, markdownEscapedPrompt);
+    const markdownEscapedDisplay = displayFn(markdownEscapedPrompt);
+    check(
+      "markdown image with entity-escaped local path renders and leaves decoded alt text",
+      markdownEscapedImage.count === 1 && markdownEscapedImage.images.length === 1 && markdownEscapedDisplay.includes("R&D screenshot") && !markdownEscapedDisplay.includes("&amp;") && !markdownEscapedDisplay.includes("![") && !markdownEscapedDisplay.includes("](") && !markdownEscapedDisplay.includes(basename(ampPath)),
+      `count=${markdownEscapedImage.count} images=${markdownEscapedImage.images.length} display=${markdownEscapedDisplay}`,
+    );
+
     const duplicateMarkdownPrompt = `compare ![before](${plainPath}) and ![after](${plainPath})`;
     const duplicateMarkdownImage = mod.normalizePromptImages(undefined, duplicateMarkdownPrompt);
     const duplicateMarkdownDisplay = displayFn(duplicateMarkdownPrompt);

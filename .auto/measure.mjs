@@ -129,6 +129,24 @@ try {
       bracketed,
     );
 
+    const markdownImagePrompt = `see ![bug screenshot](${plainPath}) before fixing`;
+    const markdownImage = mod.normalizePromptImages(undefined, markdownImagePrompt);
+    const markdownDisplay = displayFn(markdownImagePrompt);
+    check(
+      "markdown image syntax renders as attachment and leaves clean alt text",
+      markdownImage.count === 1 && markdownImage.images.length === 1 && markdownDisplay.includes("bug screenshot") && !markdownDisplay.includes("![") && !markdownDisplay.includes("](") && !markdownDisplay.includes(plainPath) && !markdownDisplay.includes(basename(plainPath)),
+      `count=${markdownImage.count} images=${markdownImage.images.length} display=${markdownDisplay}`,
+    );
+
+    const markdownAnglePrompt = `see ![space shot](<${spacedPath}>) now`;
+    const markdownAngleImage = mod.normalizePromptImages(undefined, markdownAnglePrompt);
+    const markdownAngleDisplay = displayFn(markdownAnglePrompt);
+    check(
+      "markdown image syntax with angle-wrapped spaced path renders and leaves clean alt text",
+      markdownAngleImage.count === 1 && markdownAngleImage.images.length === 1 && markdownAngleDisplay.includes("space shot") && !markdownAngleDisplay.includes("![") && !markdownAngleDisplay.includes("](") && !markdownAngleDisplay.includes(basename(spacedPath)),
+      `count=${markdownAngleImage.count} images=${markdownAngleImage.images.length} display=${markdownAngleDisplay}`,
+    );
+
     const fileTagPrompt = `describe attached image\n<file name="${plainPath}"></file>\nplease inspect it`;
     const fileTagFallback = mod.normalizePromptImages(undefined, fileTagPrompt);
     check(

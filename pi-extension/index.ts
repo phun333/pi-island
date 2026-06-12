@@ -664,7 +664,7 @@ function htmlLocalImagePathsFromTag(tag: string): string[] {
 }
 
 function normalizeHtmlLocalImageTagsForDisplay(prompt: string): string {
-  return String(prompt || "").replace(/<img\b[^>]*>/gi, (raw) => {
+  return String(prompt || "").replace(/<img\b[^>]*>(?:\s*<\/img>)?/gi, (raw) => {
     if (htmlLocalImagePathsFromTag(raw).length === 0) return raw;
     const alt = htmlAttrValue(raw, "alt")?.trim() ?? "";
     return alt ? ` ${alt} ` : " ";

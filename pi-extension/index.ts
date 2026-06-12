@@ -777,8 +777,24 @@ function normalizePromptForDisplay(prompt: string): string {
   return normalizePrompt(display.replace(/\s+([,.;:!?])/g, "$1"));
 }
 
+function promptImageUrlFromObject(img: any): string | undefined {
+  const value = img?.image_url ?? img?.imageUrl;
+  if (typeof value === "string") return value;
+  return typeof value?.url === "string" ? value.url : undefined;
+}
+
 function promptImageHashFromObject(img: any): string | null {
-  if (!img || img.type !== "image") return null;
+  if (!img) return null;
+
+  if (img.type === "image_url") {
+    const url = promptImageUrlFromObject(img);
+    if (!url) return null;
+    if (promptImageMimeFromDataUrl(url)) return promptImageHashFromBase64(url);
+    const imagePath = normalizePromptImagePath(url);
+    return imagePath ? promptImageHashFromFile(imagePath) : null;
+  }
+
+  if (img.type !== "image") return null;
 
   const directData = typeof img.data === "string" ? img.data : undefined;
   const directMime =
@@ -804,7 +820,19 @@ function promptImageHashFromObject(img: any): string | null {
 }
 
 function normalizePromptImageObject(img: any): IslandPromptImage | null {
-  if (!img || img.type !== "image") return null;
+  if (!img) return null;
+
+  if (img.type === "image_url") {
+    const url = promptImageUrlFromObject(img);
+    if (!url) return null;
+    const dataUrlMime = promptImageMimeFromDataUrl(url);
+    if (dataUrlMime) return makePromptImageFromBase64(url, dataUrlMime);
+    const imagePath = normalizePromptImagePath(url);
+    const mimeType = imagePath ? promptImageMimeForFile(imagePath) : null;
+    return imagePath && mimeType ? makePromptImageFromFile(imagePath, mimeType) : null;
+  }
+
+  if (img.type !== "image") return null;
 
   const directData = typeof img.data === "string" ? img.data : undefined;
   const directMime =

@@ -2,6 +2,7 @@
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOT = process.cwd();
 const INDEX = join(ROOT, "pi-extension", "index.ts");
@@ -94,6 +95,31 @@ try {
       "display prompt hides local image path text but keeps surrounding words",
       !display.includes(plainPath) && !display.includes(basename(plainPath)) && display.includes("resim attachlenirse") && display.includes("bu sekilde oluyor"),
       display,
+    );
+
+    const fileUrl = pathToFileURL(spacedPath).href;
+    const fileUrlImages = mod.normalizePromptImages(undefined, `attached via url ${fileUrl} should render`);
+    const fileUrlDisplay = displayFn(`attached via url ${fileUrl} should render`);
+    check(
+      "file:// image URL with escaped spaces renders and is hidden from display prompt",
+      fileUrlImages.count === 1 && fileUrlImages.images.length === 1 && !fileUrlDisplay.includes(fileUrl) && !fileUrlDisplay.includes("Screen%20Shot"),
+      `count=${fileUrlImages.count} images=${fileUrlImages.images.length} display=${fileUrlDisplay}`,
+    );
+
+    const shellEscapedPath = spacedPath.replace(/ /g, "\\\\ ");
+    const shellEscapedImages = mod.normalizePromptImages(undefined, `shell pasted ${shellEscapedPath} should render`);
+    const shellEscapedDisplay = displayFn(`shell pasted ${shellEscapedPath} should render`);
+    check(
+      "shell-escaped image path with spaces renders and is hidden from display prompt",
+      shellEscapedImages.count === 1 && shellEscapedImages.images.length === 1 && !shellEscapedDisplay.includes(shellEscapedPath) && !shellEscapedDisplay.includes(basename(spacedPath)),
+      `count=${shellEscapedImages.count} images=${shellEscapedImages.images.length} display=${shellEscapedDisplay}`,
+    );
+
+    const parenthesized = displayFn(`look at (${plainPath}) please`);
+    check(
+      "parenthesized image path is hidden from display prompt",
+      !parenthesized.includes(plainPath) && !parenthesized.includes(basename(plainPath)),
+      parenthesized,
     );
   } else {
     check("display prompt hides local image path text but keeps surrounding words", false, "normalizePromptForDisplay missing");

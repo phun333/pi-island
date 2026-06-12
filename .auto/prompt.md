@@ -30,3 +30,5 @@ Fix pi-island's prompt/hover handling when a user attaches or pastes an image in
 
 ## What's Been Tried
 - Initial dirty working tree already contains image thumbnail support and hover prompt reveal. Current suspected gap: slash/skill prompts plus unquoted paths with spaces can be parsed as a bogus path starting at `/skill:...`, and displayed prompt text still includes local image paths instead of hiding them once rendered as thumbnails.
+- Kept `acdfc01`: required prompt image paths to be real files, scanned from each path-looking prefix before known image extensions so `/skill:... /tmp/Screen Shot.png` resolves to the real file, and added `normalizePromptForDisplay()` so rendered local image paths are removed from hover text. Original 8-check workload is now 0 failures.
+- Current iteration expands the workload with generalized edge cases (file URLs with escaped spaces, shell-escaped spaces, and parenthesized paths) to guard against overfitting to a single `/var/.../clipboard.png` example.

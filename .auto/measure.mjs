@@ -397,6 +397,15 @@ try {
       `count=${htmlImgPaired.count} images=${htmlImgPaired.images.length} display=${htmlImgPairedDisplay}`,
     );
 
+    const htmlFigurePrompt = `see <figure><img src="${plainPath}" alt="figure shot"><figcaption>caption text</figcaption></figure> now`;
+    const htmlFigure = mod.normalizePromptImages(undefined, htmlFigurePrompt);
+    const htmlFigureDisplay = displayFn(htmlFigurePrompt);
+    check(
+      "html figure containing local image renders and removes figure/caption tag clutter",
+      htmlFigure.count === 1 && htmlFigure.images.length === 1 && htmlFigureDisplay.includes("figure shot") && htmlFigureDisplay.includes("caption text") && !htmlFigureDisplay.includes("<figure") && !htmlFigureDisplay.includes("</figure>") && !htmlFigureDisplay.includes("<figcaption") && !htmlFigureDisplay.includes("</figcaption>") && !htmlFigureDisplay.includes("<img") && !htmlFigureDisplay.includes(plainPath) && !htmlFigureDisplay.includes(basename(plainPath)),
+      `count=${htmlFigure.count} images=${htmlFigure.images.length} display=${htmlFigureDisplay}`,
+    );
+
     const htmlImgAltFirstPrompt = `see <img alt='space shot' src="${spacedPath}"> now`;
     const htmlImgAltFirst = mod.normalizePromptImages(undefined, htmlImgAltFirstPrompt);
     const htmlImgAltFirstDisplay = displayFn(htmlImgAltFirstPrompt);

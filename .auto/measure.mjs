@@ -92,6 +92,13 @@ try {
     `count=${directImageUrlDataUrl.count} images=${directImageUrlDataUrl.images.length} mime=${directImageUrlDataUrl.images[0]?.mimeType}`,
   );
 
+  const directSourceUrl = mod.normalizePromptImages([{ type: "image", source: { type: "url", url: pathToFileURL(plainPath).href } }], "describe source url image");
+  check(
+    "direct image source URL local file payload renders",
+    directSourceUrl.count === 1 && directSourceUrl.images.length === 1 && directSourceUrl.images[0]?.mimeType === "image/png",
+    `count=${directSourceUrl.count} images=${directSourceUrl.images.length} mime=${directSourceUrl.images[0]?.mimeType}`,
+  );
+
   const duplicateDirect = mod.normalizePromptImages([
     { type: "image", data: tinyPngBase64, mimeType: "image/png" },
     { type: "image", data: tinyPngBase64, mimeType: "image/png" },

@@ -309,6 +309,15 @@ try {
       `count=${htmlSourceSrc.count} images=${htmlSourceSrc.images.length} display=${htmlSourceSrcDisplay}`,
     );
 
+    const htmlPicturePrompt = `see <picture><source srcset="${srcsetAltPath} 2x"><img src="${plainPath}" alt="picture shot"></picture> before fixing`;
+    const htmlPicture = mod.normalizePromptImages(undefined, htmlPicturePrompt);
+    const htmlPictureDisplay = displayFn(htmlPicturePrompt);
+    check(
+      "html picture source+img alternatives count as one semantic attachment and leave clean alt text",
+      htmlPicture.count === 1 && htmlPicture.images.length === 1 && htmlPictureDisplay.includes("picture shot") && !htmlPictureDisplay.includes("<picture") && !htmlPictureDisplay.includes("</picture>") && !htmlPictureDisplay.includes("<source") && !htmlPictureDisplay.includes("<img") && !htmlPictureDisplay.includes(plainPath) && !htmlPictureDisplay.includes(srcsetAltPath),
+      `count=${htmlPicture.count} images=${htmlPicture.images.length} display=${htmlPictureDisplay}`,
+    );
+
     const htmlAnchorPrompt = `see <a href="${plainPath}">linked screenshot</a> before fixing`;
     const htmlAnchor = mod.normalizePromptImages(undefined, htmlAnchorPrompt);
     const htmlAnchorDisplay = displayFn(htmlAnchorPrompt);

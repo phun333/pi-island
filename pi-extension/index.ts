@@ -740,6 +740,10 @@ function normalizeHtmlPictureWrappersForDisplay(prompt: string): string {
   return String(prompt || "").replace(/<\/?picture\b[^>]*>/gi, " ");
 }
 
+function normalizeHtmlFigureWrappersForDisplay(prompt: string): string {
+  return String(prompt || "").replace(/<\/?(?:figure|figcaption)\b[^>]*>/gi, " ");
+}
+
 function normalizeHtmlLocalImageAnchorsForDisplay(prompt: string): string {
   return String(prompt || "").replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, (raw) => {
     const href = htmlAttrValue(raw, "href");
@@ -806,6 +810,7 @@ function normalizePromptForDisplay(prompt: string): string {
   display = normalizeHtmlLocalImageTagsForDisplay(display);
   display = normalizeHtmlLocalImageSourceTagsForDisplay(display);
   display = normalizeHtmlPictureWrappersForDisplay(display);
+  display = normalizeHtmlFigureWrappersForDisplay(display);
   display = normalizeHtmlLocalImageAnchorsForDisplay(display);
 
   // pi's CLI file-argument flow represents attached images as both an

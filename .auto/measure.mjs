@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,10 +39,16 @@ const plainPath = join(imgDir, "clipboard-2026-06-12-114401-8AB7154E.png");
 const spacedPath = join(imgDir, "Screen Shot 2026-06-12 at 11.44.01.png");
 const extensionlessPath = join(imgDir, "clipboard-image-without-extension");
 const parenPath = join(imgDir, "Screen Shot (1).png");
+const relDir = mkdtempSync(join(ROOT, ".auto", "tmp-rel-images-"));
+const cwdRelativePath = `./${relative(ROOT, join(relDir, "relative Screen Shot.png"))}`;
+process.on("exit", () => {
+  try { rmSync(relDir, { recursive: true, force: true }); } catch {}
+});
 writeFileSync(plainPath, tinyPng);
 writeFileSync(spacedPath, tinyPng);
 writeFileSync(extensionlessPath, tinyPng);
 writeFileSync(parenPath, tinyPng);
+writeFileSync(join(ROOT, cwdRelativePath), tinyPng);
 
 let failures = 0;
 let tests = 0;
@@ -124,6 +130,14 @@ try {
       "relative local image path renders and is hidden from display prompt",
       relativePathImages.count === 1 && relativePathImages.images.length === 1 && !relativePathDisplay.includes(relativePlainPath) && !relativePathDisplay.includes(basename(plainPath)),
       `relative=${relativePlainPath} count=${relativePathImages.count} images=${relativePathImages.images.length} display=${relativePathDisplay}`,
+    );
+
+    const cwdRelativeImages = mod.normalizePromptImages(undefined, `cwd relative screenshot ${cwdRelativePath} should render`);
+    const cwdRelativeDisplay = displayFn(`cwd relative screenshot ${cwdRelativePath} should render`);
+    check(
+      "cwd-relative ./ image path renders and is hidden from display prompt",
+      cwdRelativeImages.count === 1 && cwdRelativeImages.images.length === 1 && !cwdRelativeDisplay.includes(cwdRelativePath) && !cwdRelativeDisplay.includes("relative Screen Shot.png"),
+      `relative=${cwdRelativePath} count=${cwdRelativeImages.count} images=${cwdRelativeImages.images.length} display=${cwdRelativeDisplay}`,
     );
 
     const parenthesized = displayFn(`look at (${plainPath}) please`);

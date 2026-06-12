@@ -286,6 +286,16 @@ function sniffPromptImageMime(imagePath: string): string | null {
 }
 
 function promptImageMimeForFile(imagePath: string): string | null {
+  // Extension checks alone are not enough here: prompt text often begins with
+  // slash commands such as /skill:foo, and a naive "from the first slash to
+  // .png" candidate can look image-like while not being a real file. Require
+  // the file to exist before accepting either extension-based or sniffed MIME.
+  try {
+    const st = statSync(imagePath);
+    if (!st.isFile() || st.size <= 0 || st.size > MAX_PROMPT_IMAGE_SOURCE_BYTES) return null;
+  } catch {
+    return null;
+  }
   return promptImageMimeForPath(imagePath) ?? sniffPromptImageMime(imagePath);
 }
 
@@ -401,40 +411,61 @@ function normalizePromptImagePath(raw: string): string | null {
   return promptImageMimeForFile(s) ? s : null;
 }
 
-function extractPromptImagePaths(prompt: string): string[] {
+type PromptImagePathMatch = { raw: string; path: string };
+
+function extractPromptImagePathMatches(prompt: string): PromptImagePathMatch[] {
   const text = String(prompt || "");
   if (!text) return [];
 
-  const paths: string[] = [];
+  const matches: PromptImagePathMatch[] = [];
   const seen = new Set<string>();
-  const add = (candidate: string) => {
+  const add = (candidate: string, raw = candidate): boolean => {
     const path = normalizePromptImagePath(candidate);
-    if (!path || seen.has(path)) return;
+    if (!path) return false;
+    // Return true for duplicates too: the caller found a real path and should
+    // not keep walking inward to shorter suffixes like /image.png.
+    if (seen.has(path)) return true;
     seen.add(path);
-    paths.push(path);
+    matches.push({ raw, path });
+    return true;
   };
 
-  // Quoted paths may contain spaces.
+  // Quoted paths may contain spaces; remove the quotes from the display prompt
+  // together with the path by keeping match[0] as the raw span.
   const quotedRe = /"([^"\r\n]+)"|'([^'\r\n]+)'|`([^`\r\n]+)`/g;
   let match: RegExpExecArray | null;
   while ((match = quotedRe.exec(text))) {
-    add(match[1] ?? match[2] ?? match[3] ?? "");
+    add(match[1] ?? match[2] ?? match[3] ?? "", match[0]);
   }
 
-  // Unquoted paths copied from Finder / Terminal often contain literal spaces
-  // (for example "Screen Shot 2026-...png") and are not shell-escaped. Match
-  // from a path-looking prefix through a known image extension before falling
-  // back to whitespace-delimited candidates.
   const extAlternation = Object.keys(IMAGE_MIME_BY_EXT)
     .map((ext) => ext.slice(1).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .sort((a, b) => b.length - a.length)
     .join("|");
-  const unquotedImagePathRe = new RegExp(
-    String.raw`(^|[\s"'\`<(])((?:file:\/\/|~[\\/]|\/|[A-Za-z]:[\\/]|\\\\)[^"'\`<>\r\n]*?\.(?:${extAlternation})(?=$|[\s"'\`<>),.;:!?}\]]))`,
+
+  // Unquoted paths copied from Finder / Terminal often contain literal spaces
+  // (for example "Screen Shot 2026-...png") and are not shell-escaped. Instead
+  // of taking the first slash before .png (which turns "/skill:foo ... /tmp/a.png"
+  // into one bogus candidate), scan every path-looking prefix before the image
+  // extension and accept the first prefix that resolves to a real image file.
+  const imageExtRe = new RegExp(
+    String.raw`\.(?:${extAlternation})(?=$|[\s"'\`<>),.;:!?}\]])`,
     "gi",
   );
-  while ((match = unquotedImagePathRe.exec(text))) {
-    add(match[2] ?? "");
+  const pathPrefixRe = /(?:file:\/\/|~[\\/]|\/|[A-Za-z]:[\\/]|\\\\)/g;
+  while ((match = imageExtRe.exec(text))) {
+    const end = match.index + match[0].length;
+    const lineStart = Math.max(text.lastIndexOf("\n", match.index) + 1, text.lastIndexOf("\r", match.index) + 1);
+    const linePrefix = text.slice(lineStart, end);
+    const starts: number[] = [];
+    pathPrefixRe.lastIndex = 0;
+    let prefix: RegExpExecArray | null;
+    while ((prefix = pathPrefixRe.exec(linePrefix))) {
+      starts.push(lineStart + prefix.index);
+    }
+    for (const start of starts) {
+      if (add(text.slice(start, end))) break;
+    }
   }
 
   // Unquoted absolute paths / file URLs. POSIX shell-escaped spaces are
@@ -445,7 +476,21 @@ function extractPromptImagePaths(prompt: string): string[] {
     add(match[0]);
   }
 
-  return paths.slice(0, MAX_PROMPT_IMAGE_PATHS);
+  return matches.slice(0, MAX_PROMPT_IMAGE_PATHS);
+}
+
+function extractPromptImagePaths(prompt: string): string[] {
+  return extractPromptImagePathMatches(prompt).map((match) => match.path);
+}
+
+function normalizePromptForDisplay(prompt: string): string {
+  let display = String(prompt || "");
+  const rawPaths = [...new Set(extractPromptImagePathMatches(display).map((match) => match.raw).filter(Boolean))]
+    .sort((a, b) => b.length - a.length);
+  for (const raw of rawPaths) {
+    display = display.split(raw).join(" ");
+  }
+  return normalizePrompt(display.replace(/\s+([,.;:!?])/g, "$1"));
 }
 
 function normalizePromptImageObject(img: any): IslandPromptImage | null {
@@ -991,7 +1036,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (evt: any, ctx) => {
     lastCtx = ctx;
     const rawPrompt = String(evt?.prompt ?? "");
-    currentPrompt = normalizePrompt(rawPrompt);
+    currentPrompt = normalizePromptForDisplay(rawPrompt);
     const promptImages = normalizePromptImages(evt?.images, rawPrompt);
     currentPromptImages = promptImages.images;
     currentPromptImageCount = promptImages.count;

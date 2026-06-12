@@ -594,24 +594,37 @@ function htmlSrcsetHasLocalImage(srcset: string): boolean {
   return htmlSrcsetLocalImagePaths(srcset).length > 0;
 }
 
+function htmlLocalImagePathsFromTag(tag: string): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  const add = (path: string | null | undefined) => {
+    if (!path || seen.has(path)) return;
+    seen.add(path);
+    paths.push(path);
+  };
+  const src = htmlAttrValue(tag, "src")?.trim();
+  add(src ? normalizePromptImagePath(src) : null);
+  const srcset = htmlAttrValue(tag, "srcset")?.trim();
+  for (const path of srcset ? htmlSrcsetLocalImagePaths(srcset) : []) add(path);
+  return paths;
+}
+
 function normalizeHtmlLocalImageTagsForDisplay(prompt: string): string {
   return String(prompt || "").replace(/<img\b[^>]*>/gi, (raw) => {
-    const src = htmlAttrValue(raw, "src")?.trim();
-    const srcset = htmlAttrValue(raw, "srcset")?.trim();
-    if (!((src && normalizePromptImagePath(src)) || (srcset && htmlSrcsetHasLocalImage(srcset)))) return raw;
+    if (htmlLocalImagePathsFromTag(raw).length === 0) return raw;
     const alt = htmlAttrValue(raw, "alt")?.trim() ?? "";
     return alt ? ` ${alt} ` : " ";
   });
 }
 
 function normalizeHtmlLocalImageSourceTagsForDisplay(prompt: string): string {
-  return String(prompt || "").replace(/<source\b[^>]*>/gi, (raw) => {
-    const src = htmlAttrValue(raw, "src")?.trim();
-    const srcset = htmlAttrValue(raw, "srcset")?.trim();
-    return (src && normalizePromptImagePath(src)) || (srcset && htmlSrcsetHasLocalImage(srcset))
-      ? " "
-      : raw;
-  });
+  return String(prompt || "").replace(/<source\b[^>]*>/gi, (raw) =>
+    htmlLocalImagePathsFromTag(raw).length > 0 ? " " : raw
+  );
+}
+
+function normalizeHtmlPictureWrappersForDisplay(prompt: string): string {
+  return String(prompt || "").replace(/<\/?picture\b[^>]*>/gi, " ");
 }
 
 function normalizeHtmlLocalImageAnchorsForDisplay(prompt: string): string {
@@ -631,22 +644,34 @@ type HtmlImageCandidateGroup = { index: number; end: number; paths: string[]; ke
 
 function extractHtmlImageCandidateGroups(prompt: string): HtmlImageCandidateGroup[] {
   const groups: HtmlImageCandidateGroup[] = [];
-  const tagRe = /<(?:img|source)\b[^>]*>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = tagRe.exec(String(prompt || "")))) {
-    const raw = match[0];
+  const text = String(prompt || "");
+  const collectTagPaths = (html: string): string[] => {
     const paths: string[] = [];
     const seen = new Set<string>();
-    const add = (path: string | null | undefined) => {
-      if (!path || seen.has(path)) return;
-      seen.add(path);
-      paths.push(path);
-    };
-    const src = htmlAttrValue(raw, "src")?.trim();
-    add(src ? normalizePromptImagePath(src) : null);
-    const srcset = htmlAttrValue(raw, "srcset")?.trim();
-    for (const path of srcset ? htmlSrcsetLocalImagePaths(srcset) : []) add(path);
-    if (paths.length > 1) groups.push({ index: match.index, end: match.index + raw.length, paths, kept: false });
+    const tagRe = /<(?:img|source)\b[^>]*>/gi;
+    let tag: RegExpExecArray | null;
+    while ((tag = tagRe.exec(html))) {
+      for (const path of htmlLocalImagePathsFromTag(tag[0])) {
+        if (seen.has(path)) continue;
+        seen.add(path);
+        paths.push(path);
+      }
+    }
+    return paths;
+  };
+
+  const pictureRe = /<picture\b[^>]*>[\s\S]*?<\/picture>/gi;
+  let picture: RegExpExecArray | null;
+  while ((picture = pictureRe.exec(text))) {
+    const paths = collectTagPaths(picture[0]);
+    if (paths.length > 1) groups.push({ index: picture.index, end: picture.index + picture[0].length, paths, kept: false });
+  }
+
+  const tagRe = /<(?:img|source)\b[^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = tagRe.exec(text))) {
+    const paths = htmlLocalImagePathsFromTag(match[0]);
+    if (paths.length > 1) groups.push({ index: match.index, end: match.index + match[0].length, paths, kept: false });
   }
   return groups;
 }
@@ -667,6 +692,7 @@ function normalizePromptForDisplay(prompt: string): string {
   // anchors get the same treatment, preserving only the human-readable link text.
   display = normalizeHtmlLocalImageTagsForDisplay(display);
   display = normalizeHtmlLocalImageSourceTagsForDisplay(display);
+  display = normalizeHtmlPictureWrappersForDisplay(display);
   display = normalizeHtmlLocalImageAnchorsForDisplay(display);
 
   // pi's CLI file-argument flow represents attached images as both an

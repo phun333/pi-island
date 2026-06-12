@@ -407,6 +407,15 @@ try {
       `count=${htmlAnchorFileUrl.count} images=${htmlAnchorFileUrl.images.length} display=${htmlAnchorFileUrlDisplay}`,
     );
 
+    const htmlAnchorEscapedPrompt = `see <a href="${ampPath.replace(/&/g, "&amp;")}">R&amp;D screenshot</a> now`;
+    const htmlAnchorEscaped = mod.normalizePromptImages(undefined, htmlAnchorEscapedPrompt);
+    const htmlAnchorEscapedDisplay = displayFn(htmlAnchorEscapedPrompt);
+    check(
+      "html anchor entity-escaped image href renders and leaves decoded link text",
+      htmlAnchorEscaped.count === 1 && htmlAnchorEscaped.images.length === 1 && htmlAnchorEscapedDisplay.includes("R&D screenshot") && !htmlAnchorEscapedDisplay.includes("&amp;") && !htmlAnchorEscapedDisplay.includes("<a") && !htmlAnchorEscapedDisplay.includes("href=") && !htmlAnchorEscapedDisplay.includes("</a>") && !htmlAnchorEscapedDisplay.includes(basename(ampPath)),
+      `count=${htmlAnchorEscaped.count} images=${htmlAnchorEscaped.images.length} display=${htmlAnchorEscapedDisplay}`,
+    );
+
     const fileTagPrompt = `describe attached image\n<file name="${plainPath}"></file>\nplease inspect it`;
     const fileTagFallback = mod.normalizePromptImages(undefined, fileTagPrompt);
     check(

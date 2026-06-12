@@ -313,6 +313,15 @@ try {
       `count=${htmlImgMultiSrcset.count} images=${htmlImgMultiSrcset.images.length} display=${htmlImgMultiSrcsetDisplay}`,
     );
 
+    const directPlusHtmlSrcsetSecondCandidatePrompt = `direct pasted image plus html srcset <img srcset="${separateFileTagPath} 1x, ${plainPath} 2x" alt="direct srcset duplicate">`;
+    const directPlusHtmlSrcsetSecondCandidate = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], directPlusHtmlSrcsetSecondCandidatePrompt);
+    const directPlusHtmlSrcsetSecondCandidateDisplay = displayFn(directPlusHtmlSrcsetSecondCandidatePrompt);
+    check(
+      "direct image matching non-first html srcset candidate suppresses whole semantic group",
+      directPlusHtmlSrcsetSecondCandidate.count === 1 && directPlusHtmlSrcsetSecondCandidate.images.length === 1 && directPlusHtmlSrcsetSecondCandidateDisplay.includes("direct srcset duplicate") && !directPlusHtmlSrcsetSecondCandidateDisplay.includes("<img") && !directPlusHtmlSrcsetSecondCandidateDisplay.includes("srcset=") && !directPlusHtmlSrcsetSecondCandidateDisplay.includes(separateFileTagPath) && !directPlusHtmlSrcsetSecondCandidateDisplay.includes(plainPath),
+      `count=${directPlusHtmlSrcsetSecondCandidate.count} images=${directPlusHtmlSrcsetSecondCandidate.images.length} display=${directPlusHtmlSrcsetSecondCandidateDisplay}`,
+    );
+
     const htmlSourceSrcsetPrompt = `see <source srcset="${plainPath} 1x" media="(min-width: 1px)"> before fixing`;
     const htmlSourceSrcset = mod.normalizePromptImages(undefined, htmlSourceSrcsetPrompt);
     const htmlSourceSrcsetDisplay = displayFn(htmlSourceSrcsetPrompt);

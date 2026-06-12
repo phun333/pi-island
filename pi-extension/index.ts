@@ -550,15 +550,24 @@ function htmlAttrValue(tag: string, name: string): string | undefined {
   return match ? (match[1] ?? match[2] ?? match[3] ?? "") : undefined;
 }
 
-function htmlSrcsetHasLocalImage(srcset: string): boolean {
+function htmlSrcsetLocalImagePaths(srcset: string): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
   for (const item of String(srcset || "").split(",")) {
     // Strip a simple srcset density/width descriptor ("1x", "2x", "640w")
     // before resolving. URLs with spaces should be quoted/escaped in real HTML;
-    // this keeps the common single-candidate clipboard case lightweight.
+    // this keeps the common clipboard cases lightweight.
     const candidate = item.trim().replace(/\s+\d+(?:\.\d+)?[wx]\s*$/i, "").trim();
-    if (candidate && normalizePromptImagePath(candidate)) return true;
+    const path = candidate ? normalizePromptImagePath(candidate) : null;
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    paths.push(path);
   }
-  return false;
+  return paths;
+}
+
+function htmlSrcsetHasLocalImage(srcset: string): boolean {
+  return htmlSrcsetLocalImagePaths(srcset).length > 0;
 }
 
 function normalizeHtmlLocalImageTagsForDisplay(prompt: string): string {
@@ -592,6 +601,30 @@ function normalizeHtmlLocalImageAnchorsForDisplay(prompt: string): string {
       .trim();
     return text ? ` ${text} ` : " ";
   });
+}
+
+type HtmlImageCandidateGroup = { index: number; end: number; paths: string[]; kept: boolean };
+
+function extractHtmlImageCandidateGroups(prompt: string): HtmlImageCandidateGroup[] {
+  const groups: HtmlImageCandidateGroup[] = [];
+  const tagRe = /<(?:img|source)\b[^>]*>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = tagRe.exec(String(prompt || "")))) {
+    const raw = match[0];
+    const paths: string[] = [];
+    const seen = new Set<string>();
+    const add = (path: string | null | undefined) => {
+      if (!path || seen.has(path)) return;
+      seen.add(path);
+      paths.push(path);
+    };
+    const src = htmlAttrValue(raw, "src")?.trim();
+    add(src ? normalizePromptImagePath(src) : null);
+    const srcset = htmlAttrValue(raw, "srcset")?.trim();
+    for (const path of srcset ? htmlSrcsetLocalImagePaths(srcset) : []) add(path);
+    if (paths.length > 1) groups.push({ index: match.index, end: match.index + raw.length, paths, kept: false });
+  }
+  return groups;
 }
 
 function normalizePromptForDisplay(prompt: string): string {
@@ -675,6 +708,7 @@ function normalizePromptImages(images: any, prompt = ""): { images: IslandPrompt
   const directImageCount = count;
   const fileTagMatches = directImageCount > 0 ? extractPromptImageFileTagMatches(prompt) : [];
   let fileTagSkipsRemaining = Math.min(directImageCount, fileTagMatches.length);
+  const htmlImageGroups = extractHtmlImageCandidateGroups(prompt);
 
   for (const match of extractPromptImagePathMatches(prompt)) {
     const imagePath = match.path;
@@ -684,6 +718,14 @@ function normalizePromptImages(images: any, prompt = ""): { images: IslandPrompt
     if (isFileTagPath) {
       fileTagSkipsRemaining--;
       continue;
+    }
+
+    const htmlGroup = htmlImageGroups.find((group) =>
+      match.index >= group.index && match.index < group.end && group.paths.includes(imagePath)
+    );
+    if (htmlGroup) {
+      if (htmlGroup.kept) continue;
+      htmlGroup.kept = true;
     }
 
     const mimeType = promptImageMimeForFile(imagePath);

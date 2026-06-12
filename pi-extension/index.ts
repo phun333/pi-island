@@ -17,7 +17,7 @@ import { DynamicBorder, getSettingsListTheme } from "@mariozechner/pi-coding-age
 import { Container, SettingsList, type SettingItem } from "@mariozechner/pi-tui";
 import { connect, type Socket } from "node:net";
 import { spawn, execSync, execFileSync } from "node:child_process";
-import { basename, join, dirname, extname, isAbsolute } from "node:path";
+import { basename, join, dirname, extname, isAbsolute, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -407,7 +407,13 @@ function normalizePromptImagePath(raw: string): string | null {
     s = join(homedir(), s.slice(2));
   }
 
-  if (!isAbsolute(s)) return null;
+  if (!isAbsolute(s)) {
+    // Users can type/path-complete cwd-relative images just like they do for
+    // tools. Restrict this to explicit relative prefixes so ordinary words like
+    // "diagram.png" don't trigger filesystem probes all over the prompt.
+    if (!/^\.\.?[\\/]/.test(s)) return null;
+    s = resolve(process.cwd(), s);
+  }
   return promptImageMimeForFile(s) ? s : null;
 }
 
@@ -478,7 +484,7 @@ function extractPromptImagePathMatches(prompt: string, opts: { dedupe?: boolean 
     String.raw`\.(?:${extAlternation})(?=$|[\s"'\`<>),.;:!?}\]])`,
     "gi",
   );
-  const pathPrefixRe = /(?:file:\/\/|~[\\/]|\/|[A-Za-z]:[\\/]|\\\\)/g;
+  const pathPrefixRe = /(?:file:\/\/|~[\\/]|\.\.?[\\/]|\/|[A-Za-z]:[\\/]|\\\\)/g;
   while ((match = imageExtRe.exec(text))) {
     const end = match.index + match[0].length;
     const lineStart = Math.max(text.lastIndexOf("\n", match.index) + 1, text.lastIndexOf("\r", match.index) + 1);
@@ -497,7 +503,7 @@ function extractPromptImagePathMatches(prompt: string, opts: { dedupe?: boolean 
   // Unquoted absolute paths / file URLs. POSIX shell-escaped spaces are
   // kept as part of the candidate via the \\\s alternative. This also catches
   // extensionless temp files when they are whitespace-delimited.
-  const unquotedRe = /(?:file:\/\/[^\s"'`<>]+|~\/(?:\\\s|[^\s"'`<>])+|\/(?:\\\s|[^\s"'`<>])+|[A-Za-z]:[\\/][^\s"'`<>]+|\\\\[^\s"'`<>]+)/g;
+  const unquotedRe = /(?:file:\/\/[^\s"'`<>]+|~\/(?:\\\s|[^\s"'`<>])+|\.\.?[\\/](?:\\\s|[^\s"'`<>])+|\/(?:\\\s|[^\s"'`<>])+|[A-Za-z]:[\\/][^\s"'`<>]+|\\\\[^\s"'`<>]+)/g;
   while ((match = unquotedRe.exec(text))) {
     add(match[0], match[0], match.index);
   }

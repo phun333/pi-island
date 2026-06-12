@@ -38,9 +38,11 @@ const imgDir = mkdtempSync(join(tmpdir(), "pi-island-images-"));
 const plainPath = join(imgDir, "clipboard-2026-06-12-114401-8AB7154E.png");
 const spacedPath = join(imgDir, "Screen Shot 2026-06-12 at 11.44.01.png");
 const extensionlessPath = join(imgDir, "clipboard-image-without-extension");
+const parenPath = join(imgDir, "Screen Shot (1).png");
 writeFileSync(plainPath, tinyPng);
 writeFileSync(spacedPath, tinyPng);
 writeFileSync(extensionlessPath, tinyPng);
+writeFileSync(parenPath, tinyPng);
 
 let failures = 0;
 let tests = 0;
@@ -145,6 +147,24 @@ try {
       "markdown image syntax with angle-wrapped spaced path renders and leaves clean alt text",
       markdownAngleImage.count === 1 && markdownAngleImage.images.length === 1 && markdownAngleDisplay.includes("space shot") && !markdownAngleDisplay.includes("![") && !markdownAngleDisplay.includes("](") && !markdownAngleDisplay.includes(basename(spacedPath)),
       `count=${markdownAngleImage.count} images=${markdownAngleImage.images.length} display=${markdownAngleDisplay}`,
+    );
+
+    const markdownParenPrompt = `see ![paren shot](${parenPath}) now`;
+    const markdownParenImage = mod.normalizePromptImages(undefined, markdownParenPrompt);
+    const markdownParenDisplay = displayFn(markdownParenPrompt);
+    check(
+      "markdown image syntax with parenthesized filename renders and leaves clean alt text",
+      markdownParenImage.count === 1 && markdownParenImage.images.length === 1 && markdownParenDisplay.includes("paren shot") && !markdownParenDisplay.includes("![") && !markdownParenDisplay.includes("](") && !markdownParenDisplay.includes(basename(parenPath)),
+      `count=${markdownParenImage.count} images=${markdownParenImage.images.length} display=${markdownParenDisplay}`,
+    );
+
+    const markdownLinkPrompt = `see [linked screenshot](${plainPath}) before fixing`;
+    const markdownLinkImage = mod.normalizePromptImages(undefined, markdownLinkPrompt);
+    const markdownLinkDisplay = displayFn(markdownLinkPrompt);
+    check(
+      "markdown link to local image renders as attachment and leaves clean link text",
+      markdownLinkImage.count === 1 && markdownLinkImage.images.length === 1 && markdownLinkDisplay.includes("linked screenshot") && !markdownLinkDisplay.includes("[") && !markdownLinkDisplay.includes("](") && !markdownLinkDisplay.includes(plainPath) && !markdownLinkDisplay.includes(basename(plainPath)),
+      `count=${markdownLinkImage.count} images=${markdownLinkImage.images.length} display=${markdownLinkDisplay}`,
     );
 
     const fileTagPrompt = `describe attached image\n<file name="${plainPath}"></file>\nplease inspect it`;

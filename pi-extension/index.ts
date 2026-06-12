@@ -522,6 +522,10 @@ function normalizePromptForDisplay(prompt: string): string {
   for (const raw of rawPaths) {
     display = display.split(raw).join(" ");
   }
+  // If the user wrote a path in common wrappers — e.g. (/tmp/a.png) or
+  // <file:///tmp/a.png> — removing the path alone leaves visual litter like
+  // "( )". Drop empty balanced wrappers after path/tag elision.
+  display = display.replace(/\(\s*\)|\[\s*\]|\{\s*\}|<\s*>/g, " ");
   return normalizePrompt(display.replace(/\s+([,.;:!?])/g, "$1"));
 }
 

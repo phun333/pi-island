@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const ROOT = process.cwd();
@@ -115,6 +115,15 @@ try {
       "shell-escaped image path with spaces renders and is hidden from display prompt",
       shellEscapedImages.count === 1 && shellEscapedImages.images.length === 1 && !shellEscapedDisplay.includes(shellEscapedPath) && !shellEscapedDisplay.includes(basename(spacedPath)),
       `count=${shellEscapedImages.count} images=${shellEscapedImages.images.length} display=${shellEscapedDisplay}`,
+    );
+
+    const relativePlainPath = relative(ROOT, plainPath);
+    const relativePathImages = mod.normalizePromptImages(undefined, `relative screenshot ${relativePlainPath} should render`);
+    const relativePathDisplay = displayFn(`relative screenshot ${relativePlainPath} should render`);
+    check(
+      "relative local image path renders and is hidden from display prompt",
+      relativePathImages.count === 1 && relativePathImages.images.length === 1 && !relativePathDisplay.includes(relativePlainPath) && !relativePathDisplay.includes(basename(plainPath)),
+      `relative=${relativePlainPath} count=${relativePathImages.count} images=${relativePathImages.images.length} display=${relativePathDisplay}`,
     );
 
     const parenthesized = displayFn(`look at (${plainPath}) please`);

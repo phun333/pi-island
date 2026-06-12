@@ -208,6 +208,24 @@ try {
       `count=${duplicateMarkdownImage.count} images=${duplicateMarkdownImage.images.length} display=${duplicateMarkdownDisplay}`,
     );
 
+    const htmlImgPrompt = `see <img src="${plainPath}" alt="bug screenshot"> before fixing`;
+    const htmlImg = mod.normalizePromptImages(undefined, htmlImgPrompt);
+    const htmlImgDisplay = displayFn(htmlImgPrompt);
+    check(
+      "html img tag local src renders and leaves clean alt text",
+      htmlImg.count === 1 && htmlImg.images.length === 1 && htmlImgDisplay.includes("bug screenshot") && !htmlImgDisplay.includes("<img") && !htmlImgDisplay.includes("src=") && !htmlImgDisplay.includes(plainPath) && !htmlImgDisplay.includes(basename(plainPath)),
+      `count=${htmlImg.count} images=${htmlImg.images.length} display=${htmlImgDisplay}`,
+    );
+
+    const htmlImgAltFirstPrompt = `see <img alt='space shot' src="${spacedPath}"> now`;
+    const htmlImgAltFirst = mod.normalizePromptImages(undefined, htmlImgAltFirstPrompt);
+    const htmlImgAltFirstDisplay = displayFn(htmlImgAltFirstPrompt);
+    check(
+      "html img tag with alt before src and spaced local path renders cleanly",
+      htmlImgAltFirst.count === 1 && htmlImgAltFirst.images.length === 1 && htmlImgAltFirstDisplay.includes("space shot") && !htmlImgAltFirstDisplay.includes("<img") && !htmlImgAltFirstDisplay.includes("src=") && !htmlImgAltFirstDisplay.includes(basename(spacedPath)),
+      `count=${htmlImgAltFirst.count} images=${htmlImgAltFirst.images.length} display=${htmlImgAltFirstDisplay}`,
+    );
+
     const fileTagPrompt = `describe attached image\n<file name="${plainPath}"></file>\nplease inspect it`;
     const fileTagFallback = mod.normalizePromptImages(undefined, fileTagPrompt);
     check(

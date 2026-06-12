@@ -121,6 +121,28 @@ try {
       !parenthesized.includes(plainPath) && !parenthesized.includes(basename(plainPath)),
       parenthesized,
     );
+
+    const fileTagPrompt = `describe attached image\n<file name="${plainPath}"></file>\nplease inspect it`;
+    const fileTagFallback = mod.normalizePromptImages(undefined, fileTagPrompt);
+    check(
+      "image path inside CLI file tag renders as fallback attachment",
+      fileTagFallback.count === 1 && fileTagFallback.images.length === 1,
+      `count=${fileTagFallback.count} images=${fileTagFallback.images.length}`,
+    );
+
+    const fileTagWithDirectImage = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], fileTagPrompt);
+    check(
+      "direct image plus matching CLI file tag does not duplicate thumbnail count",
+      fileTagWithDirectImage.count === 1 && fileTagWithDirectImage.images.length === 1,
+      `count=${fileTagWithDirectImage.count} images=${fileTagWithDirectImage.images.length}`,
+    );
+
+    const fileTagDisplay = displayFn(fileTagPrompt);
+    check(
+      "image CLI file tag is hidden from display prompt after thumbnail extraction",
+      !fileTagDisplay.includes("<file") && !fileTagDisplay.includes("</file>") && !fileTagDisplay.includes(plainPath) && !fileTagDisplay.includes(basename(plainPath)) && fileTagDisplay.includes("describe attached image") && fileTagDisplay.includes("please inspect it"),
+      fileTagDisplay,
+    );
   } else {
     check("display prompt hides local image path text but keeps surrounding words", false, "normalizePromptForDisplay missing");
   }

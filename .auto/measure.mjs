@@ -272,6 +272,15 @@ try {
       `count=${markdownQueryImage.count} images=${markdownQueryImage.images.length} display=${markdownQueryDisplay}`,
     );
 
+    const markdownTitlePrompt = `see ![titled shot](${plainPath} "local screenshot title") now`;
+    const markdownTitleImage = mod.normalizePromptImages(undefined, markdownTitlePrompt);
+    const markdownTitleDisplay = displayFn(markdownTitlePrompt);
+    check(
+      "markdown image with optional title renders and leaves clean alt text",
+      markdownTitleImage.count === 1 && markdownTitleImage.images.length === 1 && markdownTitleDisplay.includes("titled shot") && !markdownTitleDisplay.includes("local screenshot title") && !markdownTitleDisplay.includes("![") && !markdownTitleDisplay.includes("](") && !markdownTitleDisplay.includes(plainPath) && !markdownTitleDisplay.includes(basename(plainPath)),
+      `count=${markdownTitleImage.count} images=${markdownTitleImage.images.length} display=${markdownTitleDisplay}`,
+    );
+
     const markdownAnglePrompt = `see ![space shot](<${spacedPath}>) now`;
     const markdownAngleImage = mod.normalizePromptImages(undefined, markdownAnglePrompt);
     const markdownAngleDisplay = displayFn(markdownAnglePrompt);

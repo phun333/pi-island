@@ -685,11 +685,11 @@ function normalizeHtmlLocalImageAnchorsForDisplay(prompt: string): string {
   return String(prompt || "").replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, (raw) => {
     const href = htmlAttrValue(raw, "href");
     if (!href || !normalizePromptImagePath(href.trim())) return raw;
-    const text = raw
+    const text = decodeHtmlEntities(raw
       .replace(/^<a\b[^>]*>/i, "")
       .replace(/<\/a>$/i, "")
       .replace(/<[^>]+>/g, " ")
-      .trim();
+      .trim());
     return text ? ` ${text} ` : " ";
   });
 }

@@ -253,6 +253,24 @@ try {
       `count=${htmlImgSrcset.count} images=${htmlImgSrcset.images.length} display=${htmlImgSrcsetDisplay}`,
     );
 
+    const htmlSourceSrcsetPrompt = `see <source srcset="${plainPath} 1x" media="(min-width: 1px)"> before fixing`;
+    const htmlSourceSrcset = mod.normalizePromptImages(undefined, htmlSourceSrcsetPrompt);
+    const htmlSourceSrcsetDisplay = displayFn(htmlSourceSrcsetPrompt);
+    check(
+      "html source srcset local image renders and removes source tag from display",
+      htmlSourceSrcset.count === 1 && htmlSourceSrcset.images.length === 1 && !htmlSourceSrcsetDisplay.includes("<source") && !htmlSourceSrcsetDisplay.includes("srcset=") && !htmlSourceSrcsetDisplay.includes(plainPath) && !htmlSourceSrcsetDisplay.includes(basename(plainPath)),
+      `count=${htmlSourceSrcset.count} images=${htmlSourceSrcset.images.length} display=${htmlSourceSrcsetDisplay}`,
+    );
+
+    const htmlSourceSrcPrompt = `see <source src="${plainPath}" type="image/png"> before fixing`;
+    const htmlSourceSrc = mod.normalizePromptImages(undefined, htmlSourceSrcPrompt);
+    const htmlSourceSrcDisplay = displayFn(htmlSourceSrcPrompt);
+    check(
+      "html source src local image renders and removes source tag from display",
+      htmlSourceSrc.count === 1 && htmlSourceSrc.images.length === 1 && !htmlSourceSrcDisplay.includes("<source") && !htmlSourceSrcDisplay.includes("src=") && !htmlSourceSrcDisplay.includes(plainPath) && !htmlSourceSrcDisplay.includes(basename(plainPath)),
+      `count=${htmlSourceSrc.count} images=${htmlSourceSrc.images.length} display=${htmlSourceSrcDisplay}`,
+    );
+
     const htmlAnchorPrompt = `see <a href="${plainPath}">linked screenshot</a> before fixing`;
     const htmlAnchor = mod.normalizePromptImages(undefined, htmlAnchorPrompt);
     const htmlAnchorDisplay = displayFn(htmlAnchorPrompt);

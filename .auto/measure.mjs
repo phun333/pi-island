@@ -39,6 +39,7 @@ const plainPath = join(imgDir, "clipboard-2026-06-12-114401-8AB7154E.png");
 const spacedPath = join(imgDir, "Screen Shot 2026-06-12 at 11.44.01.png");
 const extensionlessPath = join(imgDir, "clipboard-image-without-extension");
 const parenPath = join(imgDir, "Screen Shot (1).png");
+const srcsetAltPath = join(imgDir, "srcset-large.png");
 const relDir = mkdtempSync(join(ROOT, ".auto", "tmp-rel-images-"));
 const cwdRelativePath = `./${relative(ROOT, join(relDir, "relative Screen Shot.png"))}`;
 process.on("exit", () => {
@@ -48,6 +49,7 @@ writeFileSync(plainPath, tinyPng);
 writeFileSync(spacedPath, tinyPng);
 writeFileSync(extensionlessPath, tinyPng);
 writeFileSync(parenPath, tinyPng);
+writeFileSync(srcsetAltPath, tinyPng);
 writeFileSync(join(ROOT, cwdRelativePath), tinyPng);
 
 let failures = 0;
@@ -251,6 +253,15 @@ try {
       "html img srcset local image renders and leaves clean alt text",
       htmlImgSrcset.count === 1 && htmlImgSrcset.images.length === 1 && htmlImgSrcsetDisplay.includes("bug srcset") && !htmlImgSrcsetDisplay.includes("<img") && !htmlImgSrcsetDisplay.includes("srcset=") && !htmlImgSrcsetDisplay.includes(plainPath) && !htmlImgSrcsetDisplay.includes(basename(plainPath)),
       `count=${htmlImgSrcset.count} images=${htmlImgSrcset.images.length} display=${htmlImgSrcsetDisplay}`,
+    );
+
+    const htmlImgMultiSrcsetPrompt = `see <img srcset="${plainPath} 1x, ${srcsetAltPath} 2x" alt="multi srcset"> before fixing`;
+    const htmlImgMultiSrcset = mod.normalizePromptImages(undefined, htmlImgMultiSrcsetPrompt);
+    const htmlImgMultiSrcsetDisplay = displayFn(htmlImgMultiSrcsetPrompt);
+    check(
+      "html img multi-candidate srcset counts as one semantic attachment",
+      htmlImgMultiSrcset.count === 1 && htmlImgMultiSrcset.images.length === 1 && htmlImgMultiSrcsetDisplay.includes("multi srcset") && !htmlImgMultiSrcsetDisplay.includes("<img") && !htmlImgMultiSrcsetDisplay.includes("srcset=") && !htmlImgMultiSrcsetDisplay.includes(plainPath) && !htmlImgMultiSrcsetDisplay.includes(srcsetAltPath),
+      `count=${htmlImgMultiSrcset.count} images=${htmlImgMultiSrcset.images.length} display=${htmlImgMultiSrcsetDisplay}`,
     );
 
     const htmlSourceSrcsetPrompt = `see <source srcset="${plainPath} 1x" media="(min-width: 1px)"> before fixing`;

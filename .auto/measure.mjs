@@ -33,9 +33,12 @@ function buildProbeModule() {
 }
 
 const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+const tinyGifBase64 = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
 const tinyPng = Buffer.from(tinyPngBase64, "base64");
+const tinyGif = Buffer.from(tinyGifBase64, "base64");
 const imgDir = mkdtempSync(join(tmpdir(), "pi-island-images-"));
 const plainPath = join(imgDir, "clipboard-2026-06-12-114401-8AB7154E.png");
+const separateFileTagPath = join(imgDir, "separate-file-attachment.gif");
 const spacedPath = join(imgDir, "Screen Shot 2026-06-12 at 11.44.01.png");
 const extensionlessPath = join(imgDir, "clipboard-image-without-extension");
 const parenPath = join(imgDir, "Screen Shot (1).png");
@@ -46,6 +49,7 @@ process.on("exit", () => {
   try { rmSync(relDir, { recursive: true, force: true }); } catch {}
 });
 writeFileSync(plainPath, tinyPng);
+writeFileSync(separateFileTagPath, tinyGif);
 writeFileSync(spacedPath, tinyPng);
 writeFileSync(extensionlessPath, tinyPng);
 writeFileSync(parenPath, tinyPng);
@@ -349,6 +353,14 @@ try {
       "direct image plus matching CLI file tag does not duplicate thumbnail count",
       fileTagWithDirectImage.count === 1 && fileTagWithDirectImage.images.length === 1,
       `count=${fileTagWithDirectImage.count} images=${fileTagWithDirectImage.images.length}`,
+    );
+
+    const separateFileTagPrompt = `describe pasted image and separate file\n<file name="${separateFileTagPath}"></file>\nplease compare both`;
+    const directPlusSeparateFileTag = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], separateFileTagPrompt);
+    check(
+      "direct image plus different CLI image file tag keeps both thumbnails",
+      directPlusSeparateFileTag.count === 2 && directPlusSeparateFileTag.images.length === 2,
+      `count=${directPlusSeparateFileTag.count} images=${directPlusSeparateFileTag.images.length}`,
     );
 
     const fileTagDisplay = displayFn(fileTagPrompt);

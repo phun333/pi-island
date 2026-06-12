@@ -76,6 +76,26 @@ try {
   const direct = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], "describe this");
   check("direct ImageContent attachment renders", direct.count === 1 && direct.images.length === 1 && direct.images[0]?.mimeType === "image/png");
 
+  const duplicateDirect = mod.normalizePromptImages([
+    { type: "image", data: tinyPngBase64, mimeType: "image/png" },
+    { type: "image", data: tinyPngBase64, mimeType: "image/png" },
+  ], "same direct image delivered twice");
+  check(
+    "duplicate direct ImageContent payloads de-dupe by content",
+    duplicateDirect.count === 1 && duplicateDirect.images.length === 1,
+    `count=${duplicateDirect.count} images=${duplicateDirect.images.length}`,
+  );
+
+  const differentDirect = mod.normalizePromptImages([
+    { type: "image", data: tinyPngBase64, mimeType: "image/png" },
+    { type: "image", data: tinyGifBase64, mimeType: "image/gif" },
+  ], "two distinct direct images");
+  check(
+    "different direct ImageContent payloads both render",
+    differentDirect.count === 2 && differentDirect.images.length === 2,
+    `count=${differentDirect.count} images=${differentDirect.images.length}`,
+  );
+
   const plain = mod.normalizePromptImages(undefined, `please inspect ${plainPath} thanks`);
   check("plain local image path renders", plain.count === 1 && plain.images.length === 1 && plain.images[0]?.data);
 

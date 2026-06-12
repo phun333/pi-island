@@ -117,9 +117,16 @@ try {
 
     const parenthesized = displayFn(`look at (${plainPath}) please`);
     check(
-      "parenthesized image path is hidden from display prompt",
-      !parenthesized.includes(plainPath) && !parenthesized.includes(basename(plainPath)),
+      "parenthesized image path is hidden cleanly from display prompt",
+      !parenthesized.includes(plainPath) && !parenthesized.includes(basename(plainPath)) && !/[([{<]\s*[)\]}>]/.test(parenthesized),
       parenthesized,
+    );
+
+    const bracketed = displayFn(`look at <${plainPath}> please`);
+    check(
+      "angle-bracketed image path is hidden cleanly from display prompt",
+      !bracketed.includes(plainPath) && !bracketed.includes(basename(plainPath)) && !/[([{<]\s*[)\]}>]/.test(bracketed),
+      bracketed,
     );
 
     const fileTagPrompt = `describe attached image\n<file name="${plainPath}"></file>\nplease inspect it`;

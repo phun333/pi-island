@@ -504,16 +504,39 @@ function extractPromptImagePaths(prompt: string): string[] {
   return extractPromptImagePathMatches(prompt).map((match) => match.path);
 }
 
+function normalizeMarkdownLocalImageReferencesForDisplay(prompt: string): string {
+  let display = String(prompt || "");
+  const matches = extractPromptImagePathMatches(display)
+    .filter((match) => match.index >= 0)
+    .sort((a, b) => b.index - a.index);
+
+  for (const match of matches) {
+    const before = display.slice(0, match.index);
+    // Handles both images and links: ![alt](/tmp/a.png), [label](/tmp/a.png),
+    // and angle-wrapped targets like ![alt](</tmp/Screen Shot.png>).
+    const opener = before.match(/!?\[([^\]\r\n]*)\]\(\s*<?$/);
+    if (!opener || opener.index == null) continue;
+
+    const afterStart = match.index + match.raw.length;
+    const closer = display.slice(afterStart).match(/^\s*>?\)/);
+    if (!closer) continue;
+
+    const label = String(opener[1] || "").trim();
+    display = display.slice(0, opener.index) + (label ? ` ${label} ` : " ") + display.slice(afterStart + closer[0].length);
+  }
+
+  return display;
+}
+
 function normalizePromptForDisplay(prompt: string): string {
   let display = String(prompt || "");
 
-  // Markdown image syntax is another common way local screenshots show up in
-  // pasted prompts. The thumbnail carries the actual image, so keep only the
-  // useful alt text in the hover preview and drop the punctuation/path.
-  display = display.replace(/!\[([^\]\r\n]*)\]\(([^)\r\n]+)\)/g, (raw, alt, target) => {
-    const imageTarget = String(target || "").trim().replace(/^<([\s\S]*)>$/, "$1");
-    return normalizePromptImagePath(imageTarget) ? ` ${String(alt || "").trim()} ` : raw;
-  });
+  // Markdown image/link syntax is another common way local screenshots show up
+  // in pasted prompts. The thumbnail carries the actual image, so keep only the
+  // useful alt/link text in the hover preview and drop punctuation/path. This is
+  // path-match based instead of target-regex based so filenames containing ')'
+  // still clean up correctly.
+  display = normalizeMarkdownLocalImageReferencesForDisplay(display);
 
   // pi's CLI file-argument flow represents attached images as both an
   // ImageContent payload and a lightweight <file name="/path/image.png"> tag

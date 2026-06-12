@@ -477,16 +477,18 @@ function extractPromptImageFileTagMatches(prompt: string): PromptImageFileTagMat
 
   const matches: PromptImageFileTagMatch[] = [];
   const seen = new Set<string>();
-  const fileTagRe = /<file\s+name=(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s>]+))[^>]*(?:\/\s*>|>[\s\S]*?<\/file>)/gi;
+  const fileTagRe = /<file\b[^>]*(?:\/\s*>|>[\s\S]*?<\/file>)/gi;
   let match: RegExpExecArray | null;
   while ((match = fileTagRe.exec(text))) {
-    const candidate = match[1] ?? match[2] ?? match[3] ?? "";
+    const raw = match[0];
+    const openTag = raw.match(/^<file\b[^>]*>/i)?.[0] ?? raw;
+    const candidate = htmlAttrValue(openTag, "name") ?? "";
     const path = normalizePromptImagePath(candidate);
     if (!path) continue;
     const key = `${match.index}:${path}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    matches.push({ raw: match[0], path, index: match.index, end: match.index + match[0].length });
+    matches.push({ raw, path, index: match.index, end: match.index + raw.length });
   }
   return matches;
 }

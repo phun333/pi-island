@@ -78,6 +78,13 @@ try {
   const direct = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], "describe this");
   check("direct ImageContent attachment renders", direct.count === 1 && direct.images.length === 1 && direct.images[0]?.mimeType === "image/png");
 
+  const directMediaTypeAlias = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, media_type: "image/png" }], "describe media_type image");
+  check(
+    "direct ImageContent media_type alias renders",
+    directMediaTypeAlias.count === 1 && directMediaTypeAlias.images.length === 1 && directMediaTypeAlias.images[0]?.mimeType === "image/png",
+    `count=${directMediaTypeAlias.count} images=${directMediaTypeAlias.images.length} mime=${directMediaTypeAlias.images[0]?.mimeType}`,
+  );
+
   const directDataUrl = mod.normalizePromptImages([{ type: "image", data: `data:image/png;base64,${tinyPngBase64}` }], "describe data url image");
   check(
     "direct data URL ImageContent infers mime type and renders",

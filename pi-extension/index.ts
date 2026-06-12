@@ -616,7 +616,7 @@ function normalizeMarkdownLocalImageReferencesForDisplay(prompt: string): string
     const closer = display.slice(afterStart).match(/^\s*>?\)/);
     if (!closer) continue;
 
-    const label = String(opener[1] || "").trim();
+    const label = decodeHtmlEntities(String(opener[1] || "").trim());
     display = display.slice(0, opener.index) + (label ? ` ${label} ` : " ") + display.slice(afterStart + closer[0].length);
   }
 

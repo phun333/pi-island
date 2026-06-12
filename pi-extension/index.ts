@@ -717,6 +717,8 @@ function htmlLocalImagePathsFromTag(tag: string): string[] {
   };
   const src = htmlAttrValue(tag, "src")?.trim();
   add(src ? normalizePromptImagePath(src) : null);
+  const href = htmlAttrValue(tag, "href")?.trim();
+  add(href ? normalizePromptImagePath(href) : null);
   const srcset = htmlAttrValue(tag, "srcset")?.trim();
   for (const path of srcset ? htmlSrcsetLocalImagePaths(srcset) : []) add(path);
   return paths;
@@ -736,12 +738,22 @@ function normalizeHtmlLocalImageSourceTagsForDisplay(prompt: string): string {
   );
 }
 
+function normalizeHtmlLocalSvgImageTagsForDisplay(prompt: string): string {
+  return String(prompt || "").replace(/<image\b[^>]*>(?:\s*<\/image>)?/gi, (raw) =>
+    htmlLocalImagePathsFromTag(raw).length > 0 ? " " : raw
+  );
+}
+
 function normalizeHtmlPictureWrappersForDisplay(prompt: string): string {
   return String(prompt || "").replace(/<\/?picture\b[^>]*>/gi, " ");
 }
 
 function normalizeHtmlFigureWrappersForDisplay(prompt: string): string {
   return String(prompt || "").replace(/<\/?(?:figure|figcaption)\b[^>]*>/gi, " ");
+}
+
+function normalizeHtmlSvgWrappersForDisplay(prompt: string): string {
+  return String(prompt || "").replace(/<\/?svg\b[^>]*>/gi, " ");
 }
 
 function normalizeHtmlLocalImageAnchorsForDisplay(prompt: string): string {
@@ -809,8 +821,10 @@ function normalizePromptForDisplay(prompt: string): string {
   // anchors get the same treatment, preserving only the human-readable link text.
   display = normalizeHtmlLocalImageTagsForDisplay(display);
   display = normalizeHtmlLocalImageSourceTagsForDisplay(display);
+  display = normalizeHtmlLocalSvgImageTagsForDisplay(display);
   display = normalizeHtmlPictureWrappersForDisplay(display);
   display = normalizeHtmlFigureWrappersForDisplay(display);
+  display = normalizeHtmlSvgWrappersForDisplay(display);
   display = normalizeHtmlLocalImageAnchorsForDisplay(display);
 
   // pi's CLI file-argument flow represents attached images as both an

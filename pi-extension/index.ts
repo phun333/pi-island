@@ -434,19 +434,24 @@ function extractPromptImageFileTagMatches(prompt: string): PromptImageFileTagMat
   return matches;
 }
 
-function extractPromptImagePathMatches(prompt: string): PromptImagePathMatch[] {
+function extractPromptImagePathMatches(prompt: string, opts: { dedupe?: boolean } = {}): PromptImagePathMatch[] {
   const text = String(prompt || "");
   if (!text) return [];
 
+  const dedupe = opts.dedupe !== false;
   const matches: PromptImagePathMatch[] = [];
   const seen = new Set<string>();
+  const seenSpans = new Set<string>();
   const add = (candidate: string, raw = candidate, index = -1): boolean => {
     const path = normalizePromptImagePath(candidate);
     if (!path) return false;
     // Return true for duplicates too: the caller found a real path and should
     // not keep walking inward to shorter suffixes like /image.png.
-    if (seen.has(path)) return true;
-    seen.add(path);
+    const spanKey = `${index}:${raw}`;
+    if (seenSpans.has(spanKey)) return true;
+    if (dedupe && seen.has(path)) return true;
+    if (dedupe) seen.add(path);
+    seenSpans.add(spanKey);
     matches.push({ raw, path, index });
     return true;
   };
@@ -506,7 +511,7 @@ function extractPromptImagePaths(prompt: string): string[] {
 
 function normalizeMarkdownLocalImageReferencesForDisplay(prompt: string): string {
   let display = String(prompt || "");
-  const matches = extractPromptImagePathMatches(display)
+  const matches = extractPromptImagePathMatches(display, { dedupe: false })
     .filter((match) => match.index >= 0)
     .sort((a, b) => b.index - a.index);
 

@@ -395,6 +395,12 @@ function unescapeShellPath(s: string): string {
 function normalizePromptImagePath(raw: string): string | null {
   let s = stripTrailingPathPunctuation(raw);
   if (!s) return null;
+  // Match pi's path UX: users (and models) often prefix file paths with @.
+  // Treat @ as decoration only when it is immediately followed by a supported
+  // path prefix, and keep it in the raw span so display cleanup removes it too.
+  if (/^@(?=file:\/\/|~[\\/]|\.\.?[\\/]|\/|[A-Za-z]:[\\/]|\\\\)/.test(s)) {
+    s = s.slice(1);
+  }
 
   try {
     if (/^file:\/\//i.test(s)) s = fileURLToPath(s);
@@ -484,7 +490,7 @@ function extractPromptImagePathMatches(prompt: string, opts: { dedupe?: boolean 
     String.raw`\.(?:${extAlternation})(?=$|[\s"'\`<>),.;:!?}\]])`,
     "gi",
   );
-  const pathPrefixRe = /(?:file:\/\/|~[\\/]|\.\.?[\\/]|\/|[A-Za-z]:[\\/]|\\\\)/g;
+  const pathPrefixRe = /@?(?:file:\/\/|~[\\/]|\.\.?[\\/]|\/|[A-Za-z]:[\\/]|\\\\)/g;
   while ((match = imageExtRe.exec(text))) {
     const end = match.index + match[0].length;
     const lineStart = Math.max(text.lastIndexOf("\n", match.index) + 1, text.lastIndexOf("\r", match.index) + 1);
@@ -503,7 +509,7 @@ function extractPromptImagePathMatches(prompt: string, opts: { dedupe?: boolean 
   // Unquoted absolute paths / file URLs. POSIX shell-escaped spaces are
   // kept as part of the candidate via the \\\s alternative. This also catches
   // extensionless temp files when they are whitespace-delimited.
-  const unquotedRe = /(?:file:\/\/[^\s"'`<>]+|~\/(?:\\\s|[^\s"'`<>])+|\.\.?[\\/](?:\\\s|[^\s"'`<>])+|\/(?:\\\s|[^\s"'`<>])+|[A-Za-z]:[\\/][^\s"'`<>]+|\\\\[^\s"'`<>]+)/g;
+  const unquotedRe = /@?(?:file:\/\/[^\s"'`<>]+|~\/(?:\\\s|[^\s"'`<>])+|\.\.?[\\/](?:\\\s|[^\s"'`<>])+|\/(?:\\\s|[^\s"'`<>])+|[A-Za-z]:[\\/][^\s"'`<>]+|\\\\[^\s"'`<>]+)/g;
   while ((match = unquotedRe.exec(text))) {
     add(match[0], match[0], match.index);
   }

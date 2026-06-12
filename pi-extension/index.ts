@@ -800,7 +800,7 @@ function makePromptImageFromUrl(url: string): IslandPromptImage | null {
 function promptImageHashFromObject(img: any): string | null {
   if (!img) return null;
 
-  if (img.type === "image_url") {
+  if (img.type === "image_url" || img.type === "input_image") {
     const url = promptImageUrlFromObject(img);
     return url ? promptImageHashFromUrl(url) : null;
   }
@@ -837,7 +837,7 @@ function promptImageHashFromObject(img: any): string | null {
 function normalizePromptImageObject(img: any): IslandPromptImage | null {
   if (!img) return null;
 
-  if (img.type === "image_url") {
+  if (img.type === "image_url" || img.type === "input_image") {
     const url = promptImageUrlFromObject(img);
     return url ? makePromptImageFromUrl(url) : null;
   }

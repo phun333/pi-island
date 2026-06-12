@@ -125,6 +125,15 @@ try {
       `count=${percentEncodedImages.count} images=${percentEncodedImages.images.length} display=${percentEncodedDisplay}`,
     );
 
+    const queryPathToken = `${plainPath}?cache=123#frag`;
+    const queryPathImages = mod.normalizePromptImages(undefined, `cachebusted local path ${queryPathToken} should render`);
+    const queryPathDisplay = displayFn(`cachebusted local path ${queryPathToken} should render`);
+    check(
+      "local image path with query/fragment renders and hides whole token",
+      queryPathImages.count === 1 && queryPathImages.images.length === 1 && !queryPathDisplay.includes(plainPath) && !queryPathDisplay.includes("cache=123") && !queryPathDisplay.includes("#frag") && !queryPathDisplay.includes(basename(plainPath)),
+      `count=${queryPathImages.count} images=${queryPathImages.images.length} display=${queryPathDisplay}`,
+    );
+
     const shellEscapedPath = spacedPath.replace(/ /g, "\\\\ ");
     const shellEscapedImages = mod.normalizePromptImages(undefined, `shell pasted ${shellEscapedPath} should render`);
     const shellEscapedDisplay = displayFn(`shell pasted ${shellEscapedPath} should render`);
@@ -199,6 +208,15 @@ try {
       "markdown image syntax renders as attachment and leaves clean alt text",
       markdownImage.count === 1 && markdownImage.images.length === 1 && markdownDisplay.includes("bug screenshot") && !markdownDisplay.includes("![") && !markdownDisplay.includes("](") && !markdownDisplay.includes(plainPath) && !markdownDisplay.includes(basename(plainPath)),
       `count=${markdownImage.count} images=${markdownImage.images.length} display=${markdownDisplay}`,
+    );
+
+    const markdownQueryPrompt = `see ![query shot](${plainPath}?cache=123#frag) now`;
+    const markdownQueryImage = mod.normalizePromptImages(undefined, markdownQueryPrompt);
+    const markdownQueryDisplay = displayFn(markdownQueryPrompt);
+    check(
+      "markdown image with local query/fragment renders and leaves clean alt text",
+      markdownQueryImage.count === 1 && markdownQueryImage.images.length === 1 && markdownQueryDisplay.includes("query shot") && !markdownQueryDisplay.includes("![") && !markdownQueryDisplay.includes("](") && !markdownQueryDisplay.includes("cache=123") && !markdownQueryDisplay.includes("#frag") && !markdownQueryDisplay.includes(basename(plainPath)),
+      `count=${markdownQueryImage.count} images=${markdownQueryImage.images.length} display=${markdownQueryDisplay}`,
     );
 
     const markdownAnglePrompt = `see ![space shot](<${spacedPath}>) now`;

@@ -645,6 +645,12 @@ function normalizeMarkdownLocalImageReferencesForDisplay(prompt: string): string
       const text = decodeHtmlEntities(String(label || "").trim());
       return text ? ` ${text} ` : " ";
     });
+    display = display.replace(/!?\[([^\]\r\n]+)\](?![\[(])/g, (raw, label) => {
+      const key = markdownReferenceKey(label || "");
+      if (!referenceKeys.has(key)) return raw;
+      const text = decodeHtmlEntities(String(label || "").trim());
+      return text ? ` ${text} ` : " ";
+    });
   }
 
   const matches = extractPromptImagePathMatches(display, { dedupe: false })

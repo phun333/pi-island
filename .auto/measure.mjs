@@ -99,6 +99,13 @@ try {
     `count=${directSourceUrl.count} images=${directSourceUrl.images.length} mime=${directSourceUrl.images[0]?.mimeType}`,
   );
 
+  const directInputImageDataUrl = mod.normalizePromptImages([{ type: "input_image", image_url: `data:image/png;base64,${tinyPngBase64}` }], "describe input_image data url");
+  check(
+    "direct input_image data URL payload renders",
+    directInputImageDataUrl.count === 1 && directInputImageDataUrl.images.length === 1 && directInputImageDataUrl.images[0]?.mimeType === "image/png",
+    `count=${directInputImageDataUrl.count} images=${directInputImageDataUrl.images.length} mime=${directInputImageDataUrl.images[0]?.mimeType}`,
+  );
+
   const duplicateDirect = mod.normalizePromptImages([
     { type: "image", data: tinyPngBase64, mimeType: "image/png" },
     { type: "image", data: tinyPngBase64, mimeType: "image/png" },

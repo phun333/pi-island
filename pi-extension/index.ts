@@ -613,7 +613,7 @@ function normalizeMarkdownLocalImageReferencesForDisplay(prompt: string): string
     if (!opener || opener.index == null) continue;
 
     const afterStart = match.index + match.raw.length;
-    const closer = display.slice(afterStart).match(/^\s*>?\)/);
+    const closer = display.slice(afterStart).match(/^\s*>?(?:\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^\)\r\n]*\)))?\s*\)/);
     if (!closer) continue;
 
     const label = decodeHtmlEntities(String(opener[1] || "").trim());

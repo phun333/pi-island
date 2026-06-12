@@ -818,6 +818,12 @@ function normalizePromptImages(images: any, prompt = ""): { images: IslandPrompt
     else directImageHashes.set(hash, remainingDirectMatches - 1);
     return true;
   };
+  const consumeDirectImageMatchForFiles = (imagePaths: string[]): boolean => {
+    for (const imagePath of imagePaths) {
+      if (consumeDirectImageMatchForFile(imagePath)) return true;
+    }
+    return false;
+  };
 
   for (const match of extractPromptImagePathMatches(prompt)) {
     const imagePath = match.path;
@@ -827,9 +833,10 @@ function normalizePromptImages(images: any, prompt = ""): { images: IslandPrompt
     if (htmlGroup) {
       if (htmlGroup.kept) continue;
       htmlGroup.kept = true;
+      if (consumeDirectImageMatchForFiles(htmlGroup.paths)) continue;
+    } else if (consumeDirectImageMatchForFile(imagePath)) {
+      continue;
     }
-
-    if (consumeDirectImageMatchForFile(imagePath)) continue;
 
     const mimeType = promptImageMimeForFile(imagePath);
     if (!mimeType) continue;

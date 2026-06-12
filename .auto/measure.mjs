@@ -318,6 +318,15 @@ try {
       `count=${markdownReferenceImage.count} images=${markdownReferenceImage.images.length} display=${markdownReferenceDisplay}`,
     );
 
+    const markdownShortcutReferencePrompt = `see ![shortcut shot]\n\n[shortcut shot]: ${plainPath} "local screenshot title"\nnow`;
+    const markdownShortcutReferenceImage = mod.normalizePromptImages(undefined, markdownShortcutReferencePrompt);
+    const markdownShortcutReferenceDisplay = displayFn(markdownShortcutReferencePrompt);
+    check(
+      "markdown shortcut reference image renders and removes local reference definition",
+      markdownShortcutReferenceImage.count === 1 && markdownShortcutReferenceImage.images.length === 1 && markdownShortcutReferenceDisplay.includes("shortcut shot") && markdownShortcutReferenceDisplay.includes("now") && !markdownShortcutReferenceDisplay.includes("![") && !markdownShortcutReferenceDisplay.includes("[shortcut shot]") && !markdownShortcutReferenceDisplay.includes("local screenshot title") && !markdownShortcutReferenceDisplay.includes(plainPath) && !markdownShortcutReferenceDisplay.includes(basename(plainPath)),
+      `count=${markdownShortcutReferenceImage.count} images=${markdownShortcutReferenceImage.images.length} display=${markdownShortcutReferenceDisplay}`,
+    );
+
     const markdownAnglePrompt = `see ![space shot](<${spacedPath}>) now`;
     const markdownAngleImage = mod.normalizePromptImages(undefined, markdownAnglePrompt);
     const markdownAngleDisplay = displayFn(markdownAnglePrompt);

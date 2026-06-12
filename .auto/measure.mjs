@@ -85,6 +85,13 @@ try {
     `count=${directDataUrl.count} images=${directDataUrl.images.length} mime=${directDataUrl.images[0]?.mimeType}`,
   );
 
+  const directImageUrlDataUrl = mod.normalizePromptImages([{ type: "image_url", image_url: { url: `data:image/png;base64,${tinyPngBase64}` } }], "describe image_url data url");
+  check(
+    "direct image_url data URL payload renders",
+    directImageUrlDataUrl.count === 1 && directImageUrlDataUrl.images.length === 1 && directImageUrlDataUrl.images[0]?.mimeType === "image/png",
+    `count=${directImageUrlDataUrl.count} images=${directImageUrlDataUrl.images.length} mime=${directImageUrlDataUrl.images[0]?.mimeType}`,
+  );
+
   const duplicateDirect = mod.normalizePromptImages([
     { type: "image", data: tinyPngBase64, mimeType: "image/png" },
     { type: "image", data: tinyPngBase64, mimeType: "image/png" },

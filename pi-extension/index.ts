@@ -800,10 +800,12 @@ function normalizePromptImages(images: any, prompt = ""): { images: IslandPrompt
 
   if (Array.isArray(images)) {
     for (const img of images) {
+      const hash = promptImageHashFromObject(img);
+      if (hash && directImageHashes.has(hash)) continue;
       const image = normalizePromptImageObject(img);
       if (image) {
         addImage(image);
-        addDirectImageHash(promptImageHashFromObject(img));
+        addDirectImageHash(hash);
       }
     }
   }

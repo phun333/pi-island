@@ -539,6 +539,20 @@ function normalizeMarkdownLocalImageReferencesForDisplay(prompt: string): string
   return display;
 }
 
+function htmlAttrValue(tag: string, name: string): string | undefined {
+  const match = tag.match(new RegExp(String.raw`\b${name}\s*=\s*(?:"([^"\r\n]*)"|'([^'\r\n]*)'|([^\s>]+))`, "i"));
+  return match ? (match[1] ?? match[2] ?? match[3] ?? "") : undefined;
+}
+
+function normalizeHtmlLocalImageTagsForDisplay(prompt: string): string {
+  return String(prompt || "").replace(/<img\b[^>]*>/gi, (raw) => {
+    const src = htmlAttrValue(raw, "src");
+    if (!src || !normalizePromptImagePath(src.trim())) return raw;
+    const alt = htmlAttrValue(raw, "alt")?.trim() ?? "";
+    return alt ? ` ${alt} ` : " ";
+  });
+}
+
 function normalizePromptForDisplay(prompt: string): string {
   let display = String(prompt || "");
 
@@ -548,6 +562,11 @@ function normalizePromptForDisplay(prompt: string): string {
   // path-match based instead of target-regex based so filenames containing ')'
   // still clean up correctly.
   display = normalizeMarkdownLocalImageReferencesForDisplay(display);
+
+  // Rich clipboard / issue text may include local <img src="..." alt="...">
+  // tags. Treat them like Markdown images: render the thumbnail, keep only the
+  // alt label in the hover prompt, and remove broken tag markup.
+  display = normalizeHtmlLocalImageTagsForDisplay(display);
 
   // pi's CLI file-argument flow represents attached images as both an
   // ImageContent payload and a lightweight <file name="/path/image.png"> tag

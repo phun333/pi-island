@@ -149,6 +149,24 @@ try {
       `relative=${cwdRelativePath} count=${cwdRelativeImages.count} images=${cwdRelativeImages.images.length} display=${cwdRelativeDisplay}`,
     );
 
+    const atAbsolutePrompt = `inspect @${plainPath} please`;
+    const atAbsoluteImages = mod.normalizePromptImages(undefined, atAbsolutePrompt);
+    const atAbsoluteDisplay = displayFn(atAbsolutePrompt);
+    check(
+      "@-prefixed absolute image path renders and hides whole token",
+      atAbsoluteImages.count === 1 && atAbsoluteImages.images.length === 1 && !atAbsoluteDisplay.includes("@") && !atAbsoluteDisplay.includes(plainPath) && !atAbsoluteDisplay.includes(basename(plainPath)),
+      `count=${atAbsoluteImages.count} images=${atAbsoluteImages.images.length} display=${atAbsoluteDisplay}`,
+    );
+
+    const atRelativePrompt = `inspect @${cwdRelativePath} please`;
+    const atRelativeImages = mod.normalizePromptImages(undefined, atRelativePrompt);
+    const atRelativeDisplay = displayFn(atRelativePrompt);
+    check(
+      "@-prefixed relative image path renders and hides whole token",
+      atRelativeImages.count === 1 && atRelativeImages.images.length === 1 && !atRelativeDisplay.includes("@") && !atRelativeDisplay.includes(cwdRelativePath) && !atRelativeDisplay.includes("relative Screen Shot.png"),
+      `count=${atRelativeImages.count} images=${atRelativeImages.images.length} display=${atRelativeDisplay}`,
+    );
+
     const parenthesized = displayFn(`look at (${plainPath}) please`);
     check(
       "parenthesized image path is hidden cleanly from display prompt",

@@ -309,6 +309,15 @@ try {
       `count=${markdownTitleImage.count} images=${markdownTitleImage.images.length} display=${markdownTitleDisplay}`,
     );
 
+    const markdownReferencePrompt = `see ![reference shot][shot]\n\n[shot]: ${plainPath} "local screenshot title"\nnow`;
+    const markdownReferenceImage = mod.normalizePromptImages(undefined, markdownReferencePrompt);
+    const markdownReferenceDisplay = displayFn(markdownReferencePrompt);
+    check(
+      "markdown reference image renders and removes local reference definition",
+      markdownReferenceImage.count === 1 && markdownReferenceImage.images.length === 1 && markdownReferenceDisplay.includes("reference shot") && markdownReferenceDisplay.includes("now") && !markdownReferenceDisplay.includes("![") && !markdownReferenceDisplay.includes("[shot]") && !markdownReferenceDisplay.includes("local screenshot title") && !markdownReferenceDisplay.includes(plainPath) && !markdownReferenceDisplay.includes(basename(plainPath)),
+      `count=${markdownReferenceImage.count} images=${markdownReferenceImage.images.length} display=${markdownReferenceDisplay}`,
+    );
+
     const markdownAnglePrompt = `see ![space shot](<${spacedPath}>) now`;
     const markdownAngleImage = mod.normalizePromptImages(undefined, markdownAnglePrompt);
     const markdownAngleDisplay = displayFn(markdownAnglePrompt);

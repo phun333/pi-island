@@ -123,6 +123,15 @@ try {
       `count=${shellEscapedImages.count} images=${shellEscapedImages.images.length} display=${shellEscapedDisplay}`,
     );
 
+    const duplicatePathVariantsPrompt = `compare ${spacedPath} and ${shellEscapedPath}`;
+    const duplicatePathVariantsImages = mod.normalizePromptImages(undefined, duplicatePathVariantsPrompt);
+    const duplicatePathVariantsDisplay = displayFn(duplicatePathVariantsPrompt);
+    check(
+      "duplicate raw path variants to same image clean every occurrence without duplicate thumbnails",
+      duplicatePathVariantsImages.count === 1 && duplicatePathVariantsImages.images.length === 1 && !duplicatePathVariantsDisplay.includes(spacedPath) && !duplicatePathVariantsDisplay.includes(shellEscapedPath) && !duplicatePathVariantsDisplay.includes(basename(spacedPath)),
+      `count=${duplicatePathVariantsImages.count} images=${duplicatePathVariantsImages.images.length} display=${duplicatePathVariantsDisplay}`,
+    );
+
     const relativePlainPath = relative(ROOT, plainPath);
     const relativePathImages = mod.normalizePromptImages(undefined, `relative screenshot ${relativePlainPath} should render`);
     const relativePathDisplay = displayFn(`relative screenshot ${relativePlainPath} should render`);

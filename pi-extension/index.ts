@@ -571,6 +571,16 @@ function normalizeHtmlLocalImageTagsForDisplay(prompt: string): string {
   });
 }
 
+function normalizeHtmlLocalImageSourceTagsForDisplay(prompt: string): string {
+  return String(prompt || "").replace(/<source\b[^>]*>/gi, (raw) => {
+    const src = htmlAttrValue(raw, "src")?.trim();
+    const srcset = htmlAttrValue(raw, "srcset")?.trim();
+    return (src && normalizePromptImagePath(src)) || (srcset && htmlSrcsetHasLocalImage(srcset))
+      ? " "
+      : raw;
+  });
+}
+
 function normalizeHtmlLocalImageAnchorsForDisplay(prompt: string): string {
   return String(prompt || "").replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, (raw) => {
     const href = htmlAttrValue(raw, "href");
@@ -599,6 +609,7 @@ function normalizePromptForDisplay(prompt: string): string {
   // alt label in the hover prompt, and remove broken tag markup. Local image
   // anchors get the same treatment, preserving only the human-readable link text.
   display = normalizeHtmlLocalImageTagsForDisplay(display);
+  display = normalizeHtmlLocalImageSourceTagsForDisplay(display);
   display = normalizeHtmlLocalImageAnchorsForDisplay(display);
 
   // pi's CLI file-argument flow represents attached images as both an

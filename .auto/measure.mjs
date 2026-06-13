@@ -240,6 +240,15 @@ try {
       `count=${directPlusSameContentRawCopies.count} images=${directPlusSameContentRawCopies.images.length} display=${directPlusSameContentRawCopiesDisplay}`,
     );
 
+    const structuredPrompt = [{ type: "text", text: `structured prompt mentions ${plainPath} please inspect` }];
+    const structuredPromptImages = mod.normalizePromptImages(undefined, structuredPrompt);
+    const structuredPromptDisplay = displayFn(structuredPrompt);
+    check(
+      "structured prompt text parts render and hide local image paths",
+      structuredPromptImages.count === 1 && structuredPromptImages.images.length === 1 && structuredPromptDisplay.includes("structured prompt mentions") && structuredPromptDisplay.includes("please inspect") && !structuredPromptDisplay.includes("[object Object]") && !structuredPromptDisplay.includes(plainPath) && !structuredPromptDisplay.includes(basename(plainPath)),
+      `count=${structuredPromptImages.count} images=${structuredPromptImages.images.length} display=${structuredPromptDisplay}`,
+    );
+
     const relativePlainPath = relative(ROOT, plainPath);
     const relativePathImages = mod.normalizePromptImages(undefined, `relative screenshot ${relativePlainPath} should render`);
     const relativePathDisplay = displayFn(`relative screenshot ${relativePlainPath} should render`);

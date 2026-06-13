@@ -202,6 +202,42 @@ function normalizePrompt(s: string): string {
   return String(s || "").replace(/\s+/g, " ").trim();
 }
 
+function promptTextFromValue(value: any, seen = new WeakSet<object>(), depth = 0): string {
+  if (value == null || depth > 8) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => promptTextFromValue(item, seen, depth + 1)).filter(Boolean).join("\n");
+  }
+  if (typeof value !== "object") return "";
+  if (seen.has(value)) return "";
+  seen.add(value);
+
+  const parts: string[] = [];
+  for (const key of ["text", "content", "prompt", "message", "input"]) {
+    const part = promptTextFromValue(value[key], seen, depth + 1);
+    if (part) parts.push(part);
+  }
+
+  // Structured prompt/content parts can carry local file/image references in
+  // metadata rather than plain text. Include only local/data-free URL-ish values
+  // so we can render local attachments without leaking huge data URLs into hover.
+  const maybeAddLocalRef = (ref: unknown) => {
+    if (typeof ref !== "string" || /^data:/i.test(ref) || /^https?:\/\//i.test(ref)) return;
+    parts.push(ref);
+  };
+  maybeAddLocalRef(promptImageUrlFromObject(value));
+  maybeAddLocalRef(typeof value?.source?.url === "string" ? value.source.url : undefined);
+  if ((value.type === "file" || value.type === "image" || value.type === "input_image") && typeof value.name === "string") {
+    parts.push(`<file name="${value.name}"></file>`);
+  }
+  if ((value.type === "file" || value.type === "image" || value.type === "input_image") && typeof value.path === "string") {
+    parts.push(value.path);
+  }
+
+  return parts.join("\n");
+}
+
 const MAX_PROMPT_IMAGES = 4;
 const MAX_PROMPT_IMAGE_PATHS = 12;
 // Source images can be fairly large when they come from macOS screenshot / clipboard flows.
@@ -513,8 +549,8 @@ function normalizePromptImagePath(raw: string): string | null {
 type PromptImagePathMatch = { raw: string; path: string; index: number };
 type PromptImageFileTagMatch = { raw: string; path: string; index: number; end: number };
 
-function extractPromptImageFileTagMatches(prompt: string): PromptImageFileTagMatch[] {
-  const text = String(prompt || "");
+function extractPromptImageFileTagMatches(prompt: any): PromptImageFileTagMatch[] {
+  const text = promptTextFromValue(prompt);
   if (!text) return [];
 
   const matches: PromptImageFileTagMatch[] = [];
@@ -535,8 +571,8 @@ function extractPromptImageFileTagMatches(prompt: string): PromptImageFileTagMat
   return matches;
 }
 
-function extractPromptImagePathMatches(prompt: string, opts: { dedupe?: boolean } = {}): PromptImagePathMatch[] {
-  const text = String(prompt || "");
+function extractPromptImagePathMatches(prompt: any, opts: { dedupe?: boolean } = {}): PromptImagePathMatch[] {
+  const text = promptTextFromValue(prompt);
   if (!text) return [];
 
   const dedupe = opts.dedupe !== false;
@@ -771,9 +807,9 @@ function normalizeHtmlLocalImageAnchorsForDisplay(prompt: string): string {
 
 type HtmlImageCandidateGroup = { index: number; end: number; paths: string[]; kept: boolean };
 
-function extractHtmlImageCandidateGroups(prompt: string): HtmlImageCandidateGroup[] {
+function extractHtmlImageCandidateGroups(prompt: any): HtmlImageCandidateGroup[] {
   const groups: HtmlImageCandidateGroup[] = [];
-  const text = String(prompt || "");
+  const text = promptTextFromValue(prompt);
   const collectTagPaths = (html: string): string[] => {
     const paths: string[] = [];
     const seen = new Set<string>();
@@ -805,8 +841,8 @@ function extractHtmlImageCandidateGroups(prompt: string): HtmlImageCandidateGrou
   return groups;
 }
 
-function normalizePromptForDisplay(prompt: string): string {
-  let display = String(prompt || "");
+function normalizePromptForDisplay(prompt: any): string {
+  let display = promptTextFromValue(prompt);
 
   // Markdown image/link syntax is another common way local screenshots show up
   // in pasted prompts. The thumbnail carries the actual image, so keep only the
@@ -1484,7 +1520,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (evt: any, ctx) => {
     lastCtx = ctx;
-    const rawPrompt = String(evt?.prompt ?? "");
+    const rawPrompt = evt?.prompt ?? "";
     currentPrompt = normalizePromptForDisplay(rawPrompt);
     const promptImages = normalizePromptImages(evt?.images, rawPrompt);
     currentPromptImages = promptImages.images;

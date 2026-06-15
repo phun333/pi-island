@@ -14,8 +14,9 @@ with the top edge of the primary screen and shows, in real time, what
 each running pi session is doing:
 
 - Left:   braille spinner + project name
-- Middle: the user's original prompt (stable, doesn't move)
+- Middle: transient tool detail when available (file/command/etc.)
 - Right:  status label + elapsed timer + context % usage
+- Hover:  reveals the user's original prompt under that row
 
 Multiple concurrent pi sessions (different terminals / projects) stack
 as rows beneath one another, forming one continuous black capsule with
@@ -103,8 +104,8 @@ Three processes, three protocols:
 2. **companion ↔ island-host** — stdin/stdout line-delimited JSON, via
    `open-fixed.mjs` (see §7: host binary protocol).
 3. **companion → WebView JS** — `win.send(js)` calls `evaluateJavaScript`
-   inside the Swift host. The JS exposes `window.island.{upsertRow,
-   removeRow, setMode, setScale}` (see `island.html.mjs`).
+   inside the native host. The JS exposes `window.island.{upsertRow,
+   removeRow, setMode, setScale, hoverAt}` (see `island.html.mjs`).
 
 Inside the WebView, a single 80 ms braille ticker and a single 250 ms
 elapsed ticker update all rows in sync. Rows are merged via
@@ -123,12 +124,12 @@ The companion shuts itself down 6 s after the last client disconnects
 | pi event              | What we do                                                               | Sends status      |
 |-----------------------|--------------------------------------------------------------------------|-------------------|
 | `session_start`       | Stash the `ctx` for later `getContextUsage()` calls. Do **not** show. | –                 |
-| `before_agent_start`  | Capture `evt.prompt` (truncated to 48 chars) into `currentPrompt`.       | –                 |
+| `before_agent_start`  | Capture text from `evt.prompt` into prompt reveal state.                 | –                 |
 | `agent_start`         | Clear active-tool count, reset timer, emit first update.                 | `thinking`        |
 | `message_update`      | If no tool is running, refresh the row with current elapsed / ctx%.      | `thinking`        |
 | `tool_execution_start`| Increment active-tool count, emit tool-specific status.                  | per §4.2 below    |
 | `tool_execution_end`  | Decrement. If `isError`: emit `error`, auto-revert to `thinking` in 1.5 s. Otherwise if no active tools: back to `thinking`. | `error` / `thinking` |
-| `agent_end`           | Freeze elapsed timer, emit `done`, schedule row retract after 5 s.       | `done`            |
+| `agent_end`           | Freeze elapsed timer, emit `done`; WebView hides spinner/meta/prompt hover, centers “Done” with an animated check icon, then retracts after ~400 ms. | `done`            |
 | `session_shutdown`    | Remove row, end socket, nullify refs.                                    | (remove)          |
 
 ### 4.2. Tool → status map (`toolToIsland` in `index.ts`)
@@ -152,17 +153,26 @@ README color table.
 
 ### 4.3. Prompt handling
 
-- User prompt is captured in `before_agent_start` and truncated via
-  `truncatePrompt(str, 48)` — collapses whitespace, ellipsis if longer.
-- The middle slot **always** prefers `d.prompt`. `d.detail` is only a
-  fallback when there is no prompt (shouldn't happen for real sessions).
-- Visual styling switches via class: `.prompt` (italic, quoted) vs
-  `.detail` (monospace).
+- User prompt text is captured in `before_agent_start` via
+  `normalizePromptForDisplay()` — whitespace is collapsed before it is sent
+  to the WebView.
+- Image/file payload metadata is ignored. The island does not forward
+  `evt.images`, does not read local image paths, and does not render image
+  thumbnails/previews.
+- The compact row does not render `d.prompt` inline. `d.detail` may appear
+  in the absolute-centered middle slot; the text prompt is revealed under
+  the row on hover. Once a row reaches `done`, hover reveal is disabled so
+  the row can collapse to the centered completion state before retracting.
+- The native hosts keep the island click-through, so hover is synthetic:
+  macOS forwards global mouse coordinates via `NSEvent` and Windows polls
+  `Cursor.Position`; both call `window.island.hoverAt(x, y)`.
 
 ### 4.4. Context % & timer
 
-- Context: `ctx.getContextUsage()?.percent`, rounded. Shown as `34%`.
-  Color gates: ≥60 → amber, ≥85 → red.
+- Context: `ctx.getContextUsage()?.percent`, rounded. Rendered as a
+  rounded-cap SVG progress ring; the exact `34%` value is only shown in
+  the ring-hover tooltip.
+  Color gates: ≥50 → amber, ≥70 → orange, ≥85 → red.
 - Timer: `(Date.now() - startedAt) / 1000`, formatted as integer
   seconds — `0s / 42s / 16m / 16m 52s / 2h 15m`. Note the space
   between `1m` and `47s` — user-requested readability fix, don't
@@ -175,7 +185,7 @@ README color table.
 
 `/island` is the single entry point — no more `/island2`. With no args it
 opens a settings menu rendered via `ctx.ui.custom()` + pi-tui's
-`SettingsList` (the same drop-down UX as pi's own `/settings`). Four
+`SettingsList` (the same drop-down UX as pi's own `/settings`). Five
 rows, each Enter/Space cycles its values:
 
 | Setting      | Values                               | Apply method                           |
@@ -184,10 +194,11 @@ rows, each Enter/Space cycles its values:
 | Size         | `small` / `medium` / `large` / `xlarge` | Live (socket `scale` message).      |
 | Screen       | `primary` / `active` / `2` / `3` …  | Respawn companion (NSWindow fixed).    |
 | Notch wrap   | `auto` / `normal` / `notch`          | Respawn companion (read at spawn).     |
+| Prompt hover | `enabled` / `disabled`               | Live (socket `prompt-hover` message).  |
 
-All four fields are persisted in `~/.pi/pi-island.json`:
+All five fields are persisted in `~/.pi/pi-island.json`:
 ```json
-{ "enabled": true, "scale": "medium", "screen": "primary", "notchMode": "auto" }
+{ "enabled": true, "scale": "medium", "screen": "primary", "notchMode": "auto", "promptHover": true }
 ```
 Missing fields fall back to defaults, so a v0.1.x pref file (just
 `{"enabled": true}`) upgrades cleanly with no user action.
@@ -198,6 +209,7 @@ Missing fields fall back to defaults, so a v0.1.x pref file (just
 /island size   <small|medium|large|xlarge>
 /island screen <primary|active|2|3|...>
 /island notch  <auto|normal|notch>
+/island prompt <on|off|toggle>
 /island reload | reset                      # v0.2.1: force companion respawn
 ```
 
@@ -232,7 +244,7 @@ One JSON object per line. Writer: `writeMessage` in `index.ts`. Reader:
   "project":        "pi-auth",         // basename(cwd), truncated to ≤20 chars
   "status":         "editing",         // see STATUS table in island.html.mjs
   "detail":         "login.ts",        // optional, tool-specific short string
-  "prompt":         "fix the auth…",   // already truncated to ≤48 chars
+  "prompt":         "fix the auth bug",// prompt text, whitespace-collapsed
   "ctxPct":         34,                // 0-100, null if unknown
   "startedAt":      1713622000000,     // ms epoch, set on agent_start
   "frozenElapsed":  null,              // non-null ms = stop ticking timer
@@ -247,6 +259,9 @@ One JSON object per line. Writer: `writeMessage` in `index.ts`. Reader:
 
 // Size preset — flips the global --scale CSS var (live, no respawn)
 { "id": "...", "type": "scale",   "scale": "small" | "medium" | "large" | "xlarge" }
+
+// Prompt hover toggle — flips body.prompt-hover-enabled (live, no respawn)
+{ "id": "...", "type": "prompt-hover", "enabled": true | false }
 
 // Graceful companion shutdown — client's next ensureConnection() spawns a
 // fresh instance that re-reads ~/.pi/pi-island.json (used for screen and
@@ -277,11 +292,12 @@ type requires an explicit handler in `companion.mjs` — it won't just
 - Required on `update`: `id`, `type`, and a `status` from the vocabulary
   below. Updates without a valid `status` are dropped at the companion
   (another ghost-row safety net).
-- Everything else is optional. Companion passes the JSON straight
-  through; the WebView's `upsertRow` merges with previous state, so a
+- Everything else is optional. Companion strips legacy image-preview
+  fields (`promptImages` / `promptImageCount`) and passes the remaining
+  JSON through; the WebView's `upsertRow` merges with previous state, so a
   partial update (`{id, type, status, detail}`) keeps the earlier
-  `prompt` / `startedAt`. This is why the demo can omit `prompt` on
-  every step after the first.
+  `prompt` / `startedAt`. This is why the demo can omit `prompt` on every
+  step after the first.
 
 **Status vocabulary** — must match keys in the `STATUS` table in
 `island.html.mjs`:
@@ -292,16 +308,17 @@ thinking | reading | editing | writing | running | searching | done | error
 Unknown statuses fall back to `thinking` visual.
 
 **Preference schema** (`~/.pi/pi-island.json`) — owned by `index.ts`,
-but also read directly by `companion.mjs` on spawn for `screen` and
-`notchMode` (settings that determine NSWindow geometry and can't be
-changed without a fresh window). All fields are optional; missing
-values fall back to defaults.
+but also read directly by `companion.mjs` on spawn for `screen`,
+`notchMode`, and the initial `promptHover` flag. Geometry settings still
+require a fresh window; prompt hover can also be toggled live over the
+socket. All fields are optional; missing values fall back to defaults.
 ```jsonc
 {
   "enabled":     true,        // default true
   "scale":       "medium",    // default "medium"  (one of SCALES in §12)
   "screen":      "primary",   // default "primary" | "active" | "2" | "3" | …
   "notchMode":   "auto",      // default "auto"    | "normal" | "notch"
+  "promptHover": true,        // default true
   "lastVersion": "0.2.1"      // (v0.2.1+) pi-island version that last ran;
                               // drives the one-time upgrade notify
 }
@@ -336,11 +353,13 @@ of relying on any generic WebView shell.
 CSS grid with `130px 1fr 170px` was almost stable but showed sub-pixel
 jitter on the middle text when the right-side label cycled
 (`Editing ↔ Writing ↔ Running`). Current layout:
-- Row: `display: flex; justify-content: space-between; position: relative`
+- Row line: `display: flex; justify-content: space-between; position: relative`
 - Middle `.slot.mid`: `position: absolute; left: 50%; transform: translateX(-50%)`
 
-This pins the user's prompt **pixel-perfectly** regardless of right-slot
-reflow. Verify with `node pi-extension/demo.mjs single`.
+This pins transient tool detail **pixel-perfectly** regardless of
+right-slot reflow. The user's original prompt is not inline anymore; it
+expands below the row on synthetic hover. Verify with
+`node pi-extension/demo.mjs single`.
 
 ### 6.4. Stack = one capsule, not separate pills
 Consecutive rows share a 1 px `rgba(255,255,255,0.08)` divider; only the
@@ -387,7 +406,10 @@ decides:
 
 The live `{type:"mode"}` socket message still exists for same-session
 toggles, but settings-menu changes to `notchMode` round-trip through
-`respawn` so `autoMode` is recomputed with the new pref.
+`respawn` so `autoMode` is recomputed with the new pref. Display hot-plug
+changes are handled inside the companion without dropping client sockets:
+`getDisplaySignature()` polls the full monitor layout, recreates only the
+native host window, then replays the latest row state into the fresh WebView.
 
 ### 6.7. Demo matches production sizing
 `demo.mjs` routes through the **same** companion / WebView as real pi,
@@ -410,18 +432,19 @@ can also set `--scale` inline on a single row via `rowScale` for the
 | Window position       | `x = (screenW-WIN_W)/2, y = screenH-WIN_H` | Global coords; `y` places the TOP of the window at the TOP of the chosen screen. |
 | `SCALES` (JS)         | `{small:0.88, medium:1.0, large:1.18, xlarge:1.35}` | `island.html.mjs`. Must match the `SCALES` string list in `index.ts`. 1.35 is the ceiling at `WIN_W=640`. |
 | Row width             | `460 * scale`  | `.row` width — scales so left/middle/right proportions stay balanced. |
-| Row height            | `34 * scale`   | `.row` height; `max-height` enter animation uses the same calc. |
+| Compact row height    | `34 * scale`   | `.row-line` height; `.row.visible` max-height uses the same calc before hover expansion. |
 | Left slot max-width   | `130 * scale`  | `.slot.left` clamps the project name via ellipsis so long basenames don't collide with the absolute-centered middle slot. |
 | Middle slot max-width | `150 * scale`  | `.slot.mid`, absolute-centered. |
 | Border radius (bottom corners of last row) | `22 * scale` | Capsule corner rounding. |
 | JXA fallback geometry | `1440×900, notch=0` | If the osascript probe fails (should never).       |
-| JXA probe timeout     | 1500 ms        | `getScreenGeometry()` in `companion.mjs`.                   |
+| JXA probe timeout     | 1500 ms        | `getScreenGeometry()` / `getDisplaySignature()` in `platform.mjs`. |
+| Display poll          | 1500 ms + 700 ms debounce | `companion.mjs` watches monitor hot-plug and recreates/replays the host window when the layout changes. |
 | Idle-exit delay       | 6000 ms        | `scheduleIdleExit()` in `companion.mjs`.                    |
-| Done-row retract      | 5000 ms        | `hideTimer` in `index.ts` after `agent_end`.                |
+| Done-row retract      | 400 ms         | `hideTimer` in `index.ts` after `agent_end`; WebView centers “Done” with a check icon and hides spinner/meta/prompt hover during this grace period. |
 | Error auto-revert     | 1500 ms        | `tool_execution_end` error branch in `index.ts`.            |
 | Braille tick          | 80 ms          | `tickerB` in `island.html.mjs`.                             |
 | Elapsed tick          | 250 ms         | `tickerT` in `island.html.mjs`. Timer shows integer seconds. |
-| Prompt truncation     | 48 chars       | `truncatePrompt()` in `index.ts`.                           |
+| Prompt reveal height  | `340 * scale`  | Hover-expanded `.row` max-height; full prompt text is not source-truncated. |
 | Project truncation    | 20 chars       | `truncateProject()` in `index.ts` (source-side guard; CSS ellipsis adds a second safety net). |
 
 ### 6.9. Windows host — design decisions (v0.3.0+)
@@ -725,8 +748,8 @@ Compare with the companion's assumptions (`WIN_W`, centering math).
 
 ### 11.5. Middle text is jittering again
 `island.html.mjs .slot.mid` lost its `position: absolute`. Restore it.
-Test via `node pi-extension/demo.mjs single` and watch the prompt as
-the right label cycles.
+Test via `node pi-extension/demo.mjs single` and watch the middle tool
+detail as the right label cycles.
 
 ### 11.6. Rebuilding Swift after editing `island-host.swift`
 ```bash
@@ -752,7 +775,7 @@ caused confusing "why is the old binary running?" sessions.
   `window.level` without re-verifying top-pin on at least one Mac
   with a notch AND one without.
 - **Never** switch middle slot back to a grid track. Absolute center
-  is a hard requirement for stable text (see §6.3).
+  is a hard requirement for stable detail text (see §6.3).
 - **Never** auto-commit `pi-extension/island-host-bin` — it's
   architecture-dependent and rebuilt per-install.
 - **Never** introduce a dependency on the upstream/external WebView
@@ -810,10 +833,12 @@ caused confusing "why is the old binary running?" sessions.
 
 ## 14. Known limitations / quirks
 
-- **Screen / notch change requires a respawn** — NSWindow geometry is
-  fixed at spawn. `doSetScreen` / `doSetNotchMode` send `{type:"respawn"}`
-  and the client's next `ensureConnection()` starts a fresh companion.
-  The ~300 ms gap is visible as a brief capsule disappearance.
+- **Manual screen / notch setting changes require a companion respawn** —
+  NSWindow geometry is fixed at spawn. `doSetScreen` / `doSetNotchMode`
+  send `{type:"respawn"}` and the client's next `ensureConnection()` starts
+  a fresh companion. External monitor hot-plug is smoother: the companion
+  detects the layout change, recreates only the native host window, and
+  replays rows without disconnecting clients.
 - ~~**Single socket carries multiple session IDs**~~ **RESOLVED in
   v0.2.1.** The companion now tracks every distinct id seen on a given
   socket (`socketIds: WeakMap<Socket, Set<string>>`) and removes all
@@ -840,8 +865,6 @@ caused confusing "why is the old binary running?" sessions.
 
 Not planned yet but worth tracking:
 
-- Expand/collapse animation on hover (hover is currently blocked by
-  `clickThrough: true`; would need mouse-tracking area).
 - Show the tool's actual target in `detail` for `bash` (current first
   token is coarse — `npm test` vs `npm install` both show `npm`).
 - Optional per-session color (e.g. hash project name → hue) so users

@@ -125,6 +125,48 @@ export function getScreenGeometry(screenPref) {
   return { x: 0, y: 0, w: 1920, h: 1080, notch: 0 };
 }
 
+// Stable-ish display layout fingerprint used by the companion to notice
+// hot-plug / unplug / primary-display changes. It deliberately captures the
+// whole layout, not just the selected screen, so `screen: "active"` won't
+// reload the island every time the mouse moves between monitors.
+export function getDisplaySignature() {
+  try {
+    if (process.platform === "darwin") {
+      const script =
+        "ObjC.import('AppKit');" +
+        "const arr = [];" +
+        "for (const scr of $.NSScreen.screens.js) {" +
+        "  const f = scr.frame;" +
+        "  const sa = (scr.safeAreaInsets && scr.safeAreaInsets.top) || 0;" +
+        "  arr.push({x: Math.round(f.origin.x), y: Math.round(f.origin.y), w: Math.round(f.size.width), h: Math.round(f.size.height), notch: Math.round(sa)});" +
+        "}" +
+        "JSON.stringify(arr)";
+      return execSync(`osascript -l JavaScript -e ${JSON.stringify(script)}`, {
+        encoding: "utf8",
+        timeout: 1500,
+      }).trim();
+    }
+
+    if (process.platform === "win32") {
+      const script =
+        "Add-Type -AssemblyName System.Windows.Forms; " +
+        "$arr = @(); " +
+        "foreach ($scr in [System.Windows.Forms.Screen]::AllScreens) { " +
+        "  $b = $scr.Bounds; " +
+        "  $arr += @{x=$b.X; y=$b.Y; w=$b.Width; h=$b.Height; primary=$scr.Primary}; " +
+        "}; " +
+        "ConvertTo-Json $arr -Compress";
+      return execSync(
+        `powershell -NoProfile -NoLogo -Command "${script.replace(/"/g, '\\"')}"`,
+        { encoding: "utf8", timeout: 2000, windowsHide: true },
+      ).trim();
+    }
+  } catch { /* fall through */ }
+
+  const g = getScreenGeometry("primary");
+  return `${process.platform}:${g.x},${g.y},${g.w},${g.h},${g.notch}`;
+}
+
 // ── Window position ────────────────────────────────────────────────────────
 // Computes the (x, y) origin for the host window given screen geometry.
 //

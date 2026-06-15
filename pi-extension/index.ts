@@ -46,15 +46,16 @@ const EXTENSION_VERSION = readExtensionVersion();
 // sensible defaults so old installs keep working on upgrade.
 //
 //   {
-//     "enabled":   true,            // visibility toggle
-//     "scale":     "medium",        // size preset
-//     "screen":    "primary",       // which display
-//     "notchMode": "auto"           // notch-wrap policy
+//     "enabled":     true,            // visibility toggle
+//     "scale":       "medium",        // size preset
+//     "screen":      "primary",       // which display
+//     "notchMode":   "auto",          // notch-wrap policy
+//     "promptHover": true             // reveal prompt when hovering a row
 //   }
 //
 // The companion reads the same file at spawn time for settings it owns
-// (screen + notch). Settings that change live (size, visibility) are
-// delivered over the socket as well.
+// (screen + notch). Settings that change live (size, visibility,
+// prompt-hover) are delivered over the socket as well.
 const PREF_DIR  = join(homedir(), ".pi");
 const PREF_FILE = join(PREF_DIR, "pi-island.json");
 
@@ -85,6 +86,7 @@ type Preference = {
   scale:       Scale;
   screen:      ScreenPref;
   notchMode:   NotchMode;
+  promptHover: boolean;
   // Version of pi-island that last wrote this file. Used to fire a
   // one-time welcome notify after `npm update` so the user knows the
   // upgrade happened (and that state was auto-healed if needed).
@@ -104,22 +106,43 @@ function isScreen(v: unknown): v is ScreenPref {
   const n = parseInt(v, 10);
   return Number.isFinite(n) && n >= 1 && String(n) === v;
 }
+function parseToggle(v: unknown): boolean | null {
+  if (typeof v !== "string") return null;
+  switch (v.toLowerCase()) {
+    case "on":
+    case "enable":
+    case "enabled":
+    case "true":
+    case "yes":
+      return true;
+    case "off":
+    case "disable":
+    case "disabled":
+    case "false":
+    case "no":
+      return false;
+    default:
+      return null;
+  }
+}
 
 function readPreference(): Preference {
   const fallback: Preference = {
-    enabled:   true,
-    scale:     DEFAULT_SCALE,
-    screen:    DEFAULT_SCREEN,
-    notchMode: DEFAULT_NOTCH,
+    enabled:     true,
+    scale:       DEFAULT_SCALE,
+    screen:      DEFAULT_SCREEN,
+    notchMode:   DEFAULT_NOTCH,
+    promptHover: true,
   };
   try {
     if (!existsSync(PREF_FILE)) return fallback;
     const data = JSON.parse(readFileSync(PREF_FILE, "utf8"));
     return {
-      enabled:     data?.enabled   !== false,
+      enabled:     data?.enabled !== false,
       scale:       isScale(data?.scale)          ? data.scale     : DEFAULT_SCALE,
       screen:      isScreen(data?.screen)        ? data.screen    : DEFAULT_SCREEN,
       notchMode:   isNotchMode(data?.notchMode)  ? data.notchMode : DEFAULT_NOTCH,
+      promptHover: data?.promptHover !== false,
       lastVersion: typeof data?.lastVersion === "string" ? data.lastVersion : undefined,
     };
   } catch {
@@ -171,10 +194,42 @@ function toolToIsland(toolName: string, args: any): IslandUpdate {
   }
 }
 
-function truncatePrompt(s: string, max = 48): string {
-  const clean = String(s || "").replace(/\s+/g, " ").trim();
-  if (!clean) return "";
-  return clean.length > max ? clean.slice(0, max - 1) + "…" : clean;
+function normalizePrompt(s: string): string {
+  return String(s || "").replace(/\s+/g, " ").trim();
+}
+
+function promptTextFromValue(value: any, seen = new WeakSet<object>(), depth = 0): string {
+  if (value == null || depth > 8) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => promptTextFromValue(item, seen, depth + 1)).filter(Boolean).join("\n");
+  }
+  if (typeof value !== "object") return "";
+  if (seen.has(value)) return "";
+  seen.add(value);
+
+  // Image/file payloads can contain huge data URLs or local paths. The island
+  // no longer renders attachment previews, so keep hover text focused on
+  // textual prompt fields only.
+  const type = typeof value.type === "string" ? value.type.toLowerCase() : "";
+  if (type === "image" || type === "input_image" || type === "image_url" || type === "file") {
+    return "";
+  }
+
+  const parts: string[] = [];
+  for (const key of ["text", "content", "prompt", "message", "input"]) {
+    const part = promptTextFromValue(value[key], seen, depth + 1);
+    if (part) parts.push(part);
+  }
+
+  return parts.join("\n");
+}
+
+const DONE_HIDE_MS = 400;
+
+function normalizePromptForDisplay(prompt: any): string {
+  return normalizePrompt(promptTextFromValue(prompt));
 }
 
 // Project names come from `basename(process.cwd())` — usually short
@@ -199,6 +254,7 @@ export default function (pi: ExtensionAPI) {
   let currentScale:     Scale      = pref.scale;
   let currentScreen:    ScreenPref = pref.screen;
   let currentNotchMode: NotchMode  = pref.notchMode;
+  let currentPromptHover = pref.promptHover;
   let hideTimer: NodeJS.Timeout | null = null;
 
   const project = truncateProject(basename(process.cwd()));
@@ -215,6 +271,7 @@ export default function (pi: ExtensionAPI) {
       scale:       currentScale,
       screen:      currentScreen,
       notchMode:   currentNotchMode,
+      promptHover: currentPromptHover,
       lastVersion: EXTENSION_VERSION,
     });
   }
@@ -331,6 +388,13 @@ export default function (pi: ExtensionAPI) {
     writeMessage({ id: SESSION_ID, type: "scale", scale: currentScale });
   }
 
+  // Prompt reveal is live and global to the shared capsule. The prompt is
+  // hidden from the compact row by default; this controls whether hovering
+  // the row expands a small prompt preview beneath it.
+  function syncPromptHover() {
+    writeMessage({ id: SESSION_ID, type: "prompt-hover", enabled: currentPromptHover });
+  }
+
   async function ensureConnection(): Promise<boolean> {
     if (sock && !sock.destroyed) return true;
     if (connecting) return false;
@@ -344,6 +408,7 @@ export default function (pi: ExtensionAPI) {
         // ghost rows stick around" fix.
         if (await versionHandshake()) {
           syncScale();
+          syncPromptHover();
           return true;
         }
         await forceRespawn();
@@ -367,6 +432,7 @@ export default function (pi: ExtensionAPI) {
           // (catches the "wrong binary on PATH" failure mode).
           if (await versionHandshake()) {
             syncScale();
+            syncPromptHover();
             return true;
           }
           // If even a freshly-spawned companion disagrees, give up
@@ -387,8 +453,13 @@ export default function (pi: ExtensionAPI) {
 
   async function sendUpdate(status: string, detail = "", opts: { resetTimer?: boolean } = {}) {
     if (!shownForSession) return;
-    if (!sock) { if (!(await ensureConnection())) return; }
-    if (opts.resetTimer || startedAt == null) {
+    let refreshedConnection = false;
+    if (!sock || sock.destroyed) {
+      if (!(await ensureConnection())) return;
+      refreshedConnection = true;
+    }
+    const resetForTurn = opts.resetTimer || startedAt == null;
+    if (resetForTurn) {
       startedAt = Date.now();
       frozenElapsed = null;
     }
@@ -397,17 +468,22 @@ export default function (pi: ExtensionAPI) {
       const usage = lastCtx?.getContextUsage?.();
       if (usage && usage.percent != null) ctxPct = Math.round(usage.percent);
     } catch {}
-    writeMessage({
+    const msg: any = {
       id: SESSION_ID,
       type: "update",
       project,
       status,
       detail,
-      prompt: currentPrompt,
       startedAt,
       frozenElapsed,
       ctxPct,
-    });
+    };
+    // Send prompt text only at turn start (or after reconnect). The WebView
+    // merges later partial updates with the saved prompt.
+    if (resetForTurn || refreshedConnection) {
+      msg.prompt = currentPrompt;
+    }
+    writeMessage(msg);
   }
 
   async function sendRemove() {
@@ -497,6 +573,18 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.notify(`Island notch wrap → ${next}`, "info");
   }
 
+  async function doSetPromptHover(next: boolean, ctx: any) {
+    currentPromptHover = next;
+    persistPref();
+    // Live CSS toggle — no companion/native host respawn needed.
+    if (sock && !sock.destroyed) {
+      syncPromptHover();
+    } else if (shownForSession) {
+      if (await ensureConnection()) syncPromptHover();
+    }
+    ctx.ui.notify(`Island prompt hover → ${next ? "enabled" : "disabled"}`, "info");
+  }
+
   // ── Settings menu — same UX as pi's /settings ────────────────────────────
   // Uses pi-tui's SettingsList component via ctx.ui.custom(). Each row
   // shows a label + current value; Enter/Space cycles through `values`.
@@ -517,7 +605,7 @@ export default function (pi: ExtensionAPI) {
   async function openSettingsMenu(ctx: any) {
     if (!ctx.hasUI) {
       ctx.ui.notify(
-        "Settings menu needs an interactive UI. Try /island size|screen|notch <value>",
+        "Settings menu needs an interactive UI. Try /island size|screen|notch|prompt <value>",
         "info",
       );
       return;
@@ -557,6 +645,13 @@ export default function (pi: ExtensionAPI) {
             currentValue: currentNotchMode,
             values: [...NOTCH_MODES],
           },
+          {
+            id: "promptHover",
+            label: "Prompt hover",
+            description: "Reveal the hidden user prompt when hovering a row",
+            currentValue: currentPromptHover ? "enabled" : "disabled",
+            values: ["enabled", "disabled"],
+          },
         ];
 
       const container = new Container();
@@ -581,6 +676,8 @@ export default function (pi: ExtensionAPI) {
               await doSetScreen(newValue, ctx);
             } else if (id === "notch" && isNotchMode(newValue)) {
               await doSetNotchMode(newValue, ctx);
+            } else if (id === "promptHover") {
+              await doSetPromptHover(newValue === "enabled", ctx);
             }
           })();
           list.updateValue(id, newValue);
@@ -621,7 +718,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (evt: any, ctx) => {
     lastCtx = ctx;
-    currentPrompt = truncatePrompt(evt?.prompt ?? "", 48);
+    currentPrompt = normalizePromptForDisplay(evt?.prompt ?? "");
   });
 
   pi.on("agent_start", async (_evt, ctx) => {
@@ -666,9 +763,10 @@ export default function (pi: ExtensionAPI) {
     inAgent = false;
     if (startedAt != null) frozenElapsed = Date.now() - startedAt;
     await sendUpdate("done", "");
-    // Retract the row 5s after done so the user can read the summary.
+    // Done rows are no longer hoverable; show the centered completion
+    // confirmation briefly, then retract before the stopped loader can linger.
     if (hideTimer) clearTimeout(hideTimer);
-    hideTimer = setTimeout(async () => { await sendRemove(); }, 5000);
+    hideTimer = setTimeout(async () => { await sendRemove(); }, DONE_HIDE_MS);
   });
 
   // ── /island command ──────────────────────────────────────────────────────
@@ -680,11 +778,12 @@ export default function (pi: ExtensionAPI) {
   //   /island size <preset>     → set scale (small | medium | large)
   //   /island screen <value>    → set screen (primary | active | 2 | 3 ...)
   //   /island notch <mode>      → set notch wrap (auto | normal | notch)
+  //   /island prompt <on|off>   → reveal prompt on row hover
   //
   // Subcommands let power users / scripts skip the menu. With no args the
   // menu is the friendlier path — same UX as pi's own /settings.
   pi.registerCommand("island", {
-    description: "Open pi-island settings (or /island size|screen|notch <value>)",
+    description: "Open pi-island settings (or /island size|screen|notch|prompt <value>)",
     handler: async (args, ctx) => {
       const parts = String(args ?? "").trim().split(/\s+/).filter(Boolean);
       if (parts.length === 0) {
@@ -758,8 +857,33 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      if (sub === "prompt" || sub === "prompt-hover" || sub === "prompthover") {
+        const next = parts[1]?.toLowerCase();
+        if (!next) {
+          ctx.ui.notify(
+            `Prompt hover: ${currentPromptHover ? "enabled" : "disabled"} — try /island prompt <on|off|toggle>`,
+            "info",
+          );
+          return;
+        }
+        if (next === "toggle") {
+          await doSetPromptHover(!currentPromptHover, ctx);
+          return;
+        }
+        const enabled = parseToggle(next);
+        if (enabled == null) {
+          ctx.ui.notify(
+            `Unknown prompt hover value "${next}". Use: on, off, enabled, disabled, or toggle`,
+            "error",
+          );
+          return;
+        }
+        await doSetPromptHover(enabled, ctx);
+        return;
+      }
+
       ctx.ui.notify(
-        `Unknown subcommand "${sub}". Try: /island (menu)  or  /island size|screen|notch|reload <value>`,
+        `Unknown subcommand "${sub}". Try: /island (menu)  or  /island size|screen|notch|prompt|reload <value>`,
         "error",
       );
     },

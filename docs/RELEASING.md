@@ -26,13 +26,42 @@ Clone the repo, then:
 ```bash
 cd pi-island
 npm install
-npm run dev:link       # symlinks the global pi-island → this repo
+npm run dev:link       # builds, symlinks the global pi-island → this repo, restarts the island daemon
 ```
 
 Now `pi` runs the code from this working tree. Every `edit` is live —
-no copy, no reinstall, no restart of the `pi` CLI itself (the companion
-daemon does need to respawn, which happens automatically when the
-socket reopens).
+no copy, no reinstall, no restart of the `pi` CLI itself. The companion
+daemon and native host are long-lived processes, so `dev:link` stops any
+old copy; the next pi status frame respawns them from this checkout.
+
+`dev:link` intentionally runs `npm run build` first, so the global
+symlink points at this clone with a fresh local native host binary.
+
+### After `pi update`
+
+`pi update` refreshes pi packages and can replace the global
+`pi-island` dev symlink with the downloaded npm tarball. To point pi
+back at your local build after an update:
+
+```bash
+cd /path/to/pi-island
+npm run dev:link
+```
+
+To update pi and automatically restore the local build in one command,
+run this from the repo:
+
+```bash
+npm run dev:update
+```
+
+That command runs `pi update`, rebuilds the native host, recreates the
+`npm link`, stops any old companion/native host process, and prints
+`npm run dev:status`. The expected final state is:
+
+```text
+✓ LINKED   → /path/to/pi-island
+```
 
 ---
 
@@ -72,7 +101,7 @@ This:
 Now `pi` is running the **future npm package**. Test the real flows:
 
 ```bash
-pi /island                             # settings menu opens, 4 rows cycle cleanly
+pi /island                             # settings menu opens, rows cycle cleanly
 pi /island size large                  # quick-action applies live
 node pi-extension/demo.mjs sizes       # all four presets stacked visually
 node pi-extension/demo.mjs long        # long-running task, timer ticks

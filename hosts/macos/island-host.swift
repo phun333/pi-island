@@ -291,6 +291,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     var globalMouseMonitor: Any?
     var localMouseMonitor: Any?
 
+    // Synthetic hover for click-through windows. Because the NSWindow ignores
+    // mouse events, WKWebView cannot receive CSS :hover normally; poll the
+    // global cursor and forward WebView-local coordinates into the page.
+    var hoverTimer: Timer?
+    var hoverLastX: Int?
+    var hoverLastY: Int?
+
     // Spring physics state
     var springTargetX: CGFloat = 0
     var springTargetY: CGFloat = 0
@@ -353,6 +360,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             followMode = config.followMode
             setupWindow()
             setupWebView()
+            if config.clickThrough {
+                startHoverTracking()
+            }
             if config.followCursor {
                 if followMode == "spring" {
                     // Initialize spring position from the window position set by setupWindow()
@@ -450,6 +460,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
 
         // Load blank page so didFinish fires and we emit "ready"
         webView.loadHTMLString("<html><body></body></html>", baseURL: nil)
+    }
+
+    // MARK: - Synthetic Hover
+
+    func startHoverTracking() {
+        guard !config.statusItem, hoverTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            let mouse = NSEvent.mouseLocation
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated { self?.emitHoverAt(mouse: mouse) }
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        hoverTimer = timer
+        emitHoverAt(mouse: NSEvent.mouseLocation)
+    }
+
+    func stopHoverTracking() {
+        hoverTimer?.invalidate()
+        hoverTimer = nil
+        hoverLastX = nil
+        hoverLastY = nil
+    }
+
+    func emitHoverAt(mouse: NSPoint) {
+        guard !config.statusItem, let window = window, let webView = webView else { return }
+        let frame = window.frame
+        var x = Int((mouse.x - frame.origin.x).rounded())
+        var y = Int((frame.maxY - mouse.y).rounded())
+        if x < 0 || y < 0 || x >= Int(frame.width) || y >= Int(frame.height) {
+            x = -1
+            y = -1
+        }
+        if hoverLastX == x && hoverLastY == y { return }
+        hoverLastX = x
+        hoverLastY = y
+        webView.evaluateJavaScript("window.island&&window.island.hoverAt(\(x),\(y))", completionHandler: nil)
     }
 
     // MARK: - Status Item
@@ -783,6 +830,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     func closeAndExit() {
+        stopHoverTracking()
         if config.statusItem, let item = nsStatusItem {
             NSStatusBar.system.removeStatusItem(item)
             nsStatusItem = nil
@@ -828,6 +876,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
                 } else {
                     window.makeFirstResponder(webView)
                 }
+                hoverLastX = nil
+                hoverLastY = nil
+                emitHoverAt(mouse: NSEvent.mouseLocation)
             }
             var info = getSystemInfo()
             info["type"] = "ready"
@@ -872,6 +923,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     func windowWillClose(_ notification: Notification) {
+        stopHoverTracking()
         writeToStdout(["type": "closed"])
         exit(0)
     }

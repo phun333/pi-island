@@ -1,0 +1,591 @@
+#!/usr/bin/env node
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const ROOT = process.cwd();
+const INDEX = join(ROOT, "pi-extension", "index.ts");
+const JITI = "/Users/emre/.nvm/versions/node/v24.14.0/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/jiti/lib/jiti.mjs";
+
+function buildProbeModule() {
+  let code = readFileSync(INDEX, "utf8");
+  code = code.replace(/import type[^;]+;\n/g, "");
+  code = code.replace(
+    /import \{ DynamicBorder, getSettingsListTheme \} from "@mariozechner\/pi-coding-agent";\n/,
+    "class DynamicBorder { constructor(...args:any[]){} }\nconst getSettingsListTheme = () => ({});\n",
+  );
+  code = code.replace(
+    /import \{ Container, SettingsList, type SettingItem \} from "@mariozechner\/pi-tui";\n/,
+    "class Container { addChild(...args:any[]){} invalidate(){} render(){return [];} }\nclass SettingsList { constructor(...args:any[]){} updateValue(...args:any[]){} handleInput(...args:any[]){} }\ntype SettingItem = any;\n",
+  );
+  code = code.replace(
+    /import \{ SOCK \} from "\.\/socket-path\.mjs";\n/,
+    "const SOCK = \"/tmp/pi-island-autoresearch.sock\";\n",
+  );
+  const exports = ["normalizePromptImages", "extractPromptImagePaths", "normalizePrompt"];
+  if (/function\s+normalizePromptForDisplay\s*\(/.test(code)) exports.push("normalizePromptForDisplay");
+  code += `\nexport { ${exports.join(", ")} };\n`;
+  const dir = mkdtempSync(join(tmpdir(), "pi-island-probe-"));
+  const file = join(dir, "index-probe.ts");
+  writeFileSync(file, code);
+  return file;
+}
+
+const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+const tinyGifBase64 = "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+const tinyPng = Buffer.from(tinyPngBase64, "base64");
+const tinyGif = Buffer.from(tinyGifBase64, "base64");
+const imgDir = mkdtempSync(join(tmpdir(), "pi-island-images-"));
+const plainPath = join(imgDir, "clipboard-2026-06-12-114401-8AB7154E.png");
+const separateFileTagPath = join(imgDir, "separate-file-attachment.gif");
+const spacedPath = join(imgDir, "Screen Shot 2026-06-12 at 11.44.01.png");
+const extensionlessPath = join(imgDir, "clipboard-image-without-extension");
+const parenPath = join(imgDir, "Screen Shot (1).png");
+const ampPath = join(imgDir, "R&D Screen Shot.png");
+const srcsetAltPath = join(imgDir, "srcset-large.png");
+const relDir = mkdtempSync(join(ROOT, ".auto", "tmp-rel-images-"));
+const cwdRelativePath = `./${relative(ROOT, join(relDir, "relative Screen Shot.png"))}`;
+process.on("exit", () => {
+  try { rmSync(relDir, { recursive: true, force: true }); } catch {}
+});
+writeFileSync(plainPath, tinyPng);
+writeFileSync(separateFileTagPath, tinyGif);
+writeFileSync(spacedPath, tinyPng);
+writeFileSync(extensionlessPath, tinyPng);
+writeFileSync(parenPath, tinyPng);
+writeFileSync(ampPath, tinyPng);
+writeFileSync(srcsetAltPath, tinyPng);
+writeFileSync(join(ROOT, cwdRelativePath), tinyPng);
+
+let failures = 0;
+let tests = 0;
+function check(name, ok, details = "") {
+  tests++;
+  if (ok) {
+    console.log(`TEST PASS ${name}`);
+  } else {
+    failures++;
+    console.log(`TEST FAIL ${name}${details ? ` :: ${details}` : ""}`);
+  }
+}
+
+try {
+  const { createJiti } = await import(JITI);
+  const jiti = createJiti(import.meta.url, { moduleCache: false, fsCache: false, interopDefault: true });
+  const mod = await jiti.import(buildProbeModule());
+
+  const direct = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], "describe this");
+  check("direct ImageContent attachment renders", direct.count === 1 && direct.images.length === 1 && direct.images[0]?.mimeType === "image/png");
+
+  const directMediaTypeAlias = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, media_type: "image/png" }], "describe media_type image");
+  check(
+    "direct ImageContent media_type alias renders",
+    directMediaTypeAlias.count === 1 && directMediaTypeAlias.images.length === 1 && directMediaTypeAlias.images[0]?.mimeType === "image/png",
+    `count=${directMediaTypeAlias.count} images=${directMediaTypeAlias.images.length} mime=${directMediaTypeAlias.images[0]?.mimeType}`,
+  );
+
+  const directDataUrl = mod.normalizePromptImages([{ type: "image", data: `data:image/png;base64,${tinyPngBase64}` }], "describe data url image");
+  check(
+    "direct data URL ImageContent infers mime type and renders",
+    directDataUrl.count === 1 && directDataUrl.images.length === 1 && directDataUrl.images[0]?.mimeType === "image/png",
+    `count=${directDataUrl.count} images=${directDataUrl.images.length} mime=${directDataUrl.images[0]?.mimeType}`,
+  );
+
+  const directImageUrlDataUrl = mod.normalizePromptImages([{ type: "image_url", image_url: { url: `data:image/png;base64,${tinyPngBase64}` } }], "describe image_url data url");
+  check(
+    "direct image_url data URL payload renders",
+    directImageUrlDataUrl.count === 1 && directImageUrlDataUrl.images.length === 1 && directImageUrlDataUrl.images[0]?.mimeType === "image/png",
+    `count=${directImageUrlDataUrl.count} images=${directImageUrlDataUrl.images.length} mime=${directImageUrlDataUrl.images[0]?.mimeType}`,
+  );
+
+  const directSourceUrl = mod.normalizePromptImages([{ type: "image", source: { type: "url", url: pathToFileURL(plainPath).href } }], "describe source url image");
+  check(
+    "direct image source URL local file payload renders",
+    directSourceUrl.count === 1 && directSourceUrl.images.length === 1 && directSourceUrl.images[0]?.mimeType === "image/png",
+    `count=${directSourceUrl.count} images=${directSourceUrl.images.length} mime=${directSourceUrl.images[0]?.mimeType}`,
+  );
+
+  const directInputImageDataUrl = mod.normalizePromptImages([{ type: "input_image", image_url: `data:image/png;base64,${tinyPngBase64}` }], "describe input_image data url");
+  check(
+    "direct input_image data URL payload renders",
+    directInputImageDataUrl.count === 1 && directInputImageDataUrl.images.length === 1 && directInputImageDataUrl.images[0]?.mimeType === "image/png",
+    `count=${directInputImageDataUrl.count} images=${directInputImageDataUrl.images.length} mime=${directInputImageDataUrl.images[0]?.mimeType}`,
+  );
+
+  const duplicateDirect = mod.normalizePromptImages([
+    { type: "image", data: tinyPngBase64, mimeType: "image/png" },
+    { type: "image", data: tinyPngBase64, mimeType: "image/png" },
+  ], "same direct image delivered twice");
+  check(
+    "duplicate direct ImageContent payloads de-dupe by content",
+    duplicateDirect.count === 1 && duplicateDirect.images.length === 1,
+    `count=${duplicateDirect.count} images=${duplicateDirect.images.length}`,
+  );
+
+  const differentDirect = mod.normalizePromptImages([
+    { type: "image", data: tinyPngBase64, mimeType: "image/png" },
+    { type: "image", data: tinyGifBase64, mimeType: "image/gif" },
+  ], "two distinct direct images");
+  check(
+    "different direct ImageContent payloads both render",
+    differentDirect.count === 2 && differentDirect.images.length === 2,
+    `count=${differentDirect.count} images=${differentDirect.images.length}`,
+  );
+
+  const plain = mod.normalizePromptImages(undefined, `please inspect ${plainPath} thanks`);
+  check("plain local image path renders", plain.count === 1 && plain.images.length === 1 && plain.images[0]?.data);
+
+  const quotedSpaced = mod.normalizePromptImages(undefined, `please inspect "${spacedPath}" thanks`);
+  check("quoted image path with spaces renders", quotedSpaced.count === 1 && quotedSpaced.images.length === 1);
+
+  const slashWithSpaced = `/skill:autoresearch-create inspect attached screenshot ${spacedPath} bu sekilde olmamali`;
+  const slashSpaced = mod.normalizePromptImages(undefined, slashWithSpaced);
+  check(
+    "slash/skill prompt with unquoted spaced image path renders",
+    slashSpaced.count === 1 && slashSpaced.images.length === 1,
+    `count=${slashSpaced.count} images=${slashSpaced.images.length}`,
+  );
+
+  const extensionless = mod.normalizePromptImages(undefined, `clipboard file ${extensionlessPath} should sniff as png`);
+  check("extensionless clipboard image path is sniffed", extensionless.count === 1 && extensionless.images.length === 1);
+
+  const extracted = mod.extractPromptImagePaths(`/skill:autoresearch-create ${plainPath} devam`);
+  check(
+    "path extractor ignores slash-command prefix and returns real path only",
+    extracted.length === 1 && extracted[0] === plainPath,
+    JSON.stringify(extracted),
+  );
+
+  const displayFn = mod.normalizePromptForDisplay;
+  check("display prompt sanitizer is present", typeof displayFn === "function");
+  if (typeof displayFn === "function") {
+    const raw = `/skill:autoresearch-create resim attachlenirse prompta gozukmuyor ${plainPath} bu sekilde oluyor`;
+    const display = displayFn(raw);
+    check(
+      "display prompt hides local image path text but keeps surrounding words",
+      !display.includes(plainPath) && !display.includes(basename(plainPath)) && display.includes("resim attachlenirse") && display.includes("bu sekilde oluyor"),
+      display,
+    );
+
+    const fileUrl = pathToFileURL(spacedPath).href;
+    const fileUrlImages = mod.normalizePromptImages(undefined, `attached via url ${fileUrl} should render`);
+    const fileUrlDisplay = displayFn(`attached via url ${fileUrl} should render`);
+    check(
+      "file:// image URL with escaped spaces renders and is hidden from display prompt",
+      fileUrlImages.count === 1 && fileUrlImages.images.length === 1 && !fileUrlDisplay.includes(fileUrl) && !fileUrlDisplay.includes("Screen%20Shot"),
+      `count=${fileUrlImages.count} images=${fileUrlImages.images.length} display=${fileUrlDisplay}`,
+    );
+
+    const percentEncodedPath = spacedPath.replace(/ /g, "%20");
+    const percentEncodedImages = mod.normalizePromptImages(undefined, `encoded local path ${percentEncodedPath} should render`);
+    const percentEncodedDisplay = displayFn(`encoded local path ${percentEncodedPath} should render`);
+    check(
+      "percent-encoded local image path renders and is hidden from display prompt",
+      percentEncodedImages.count === 1 && percentEncodedImages.images.length === 1 && !percentEncodedDisplay.includes(percentEncodedPath) && !percentEncodedDisplay.includes("Screen%20Shot") && !percentEncodedDisplay.includes(basename(spacedPath)),
+      `count=${percentEncodedImages.count} images=${percentEncodedImages.images.length} display=${percentEncodedDisplay}`,
+    );
+
+    const queryPathToken = `${plainPath}?cache=123#frag`;
+    const queryPathImages = mod.normalizePromptImages(undefined, `cachebusted local path ${queryPathToken} should render`);
+    const queryPathDisplay = displayFn(`cachebusted local path ${queryPathToken} should render`);
+    check(
+      "local image path with query/fragment renders and hides whole token",
+      queryPathImages.count === 1 && queryPathImages.images.length === 1 && !queryPathDisplay.includes(plainPath) && !queryPathDisplay.includes("cache=123") && !queryPathDisplay.includes("#frag") && !queryPathDisplay.includes(basename(plainPath)),
+      `count=${queryPathImages.count} images=${queryPathImages.images.length} display=${queryPathDisplay}`,
+    );
+
+    const shellEscapedPath = spacedPath.replace(/ /g, "\\\\ ");
+    const shellEscapedImages = mod.normalizePromptImages(undefined, `shell pasted ${shellEscapedPath} should render`);
+    const shellEscapedDisplay = displayFn(`shell pasted ${shellEscapedPath} should render`);
+    check(
+      "shell-escaped image path with spaces renders and is hidden from display prompt",
+      shellEscapedImages.count === 1 && shellEscapedImages.images.length === 1 && !shellEscapedDisplay.includes(shellEscapedPath) && !shellEscapedDisplay.includes(basename(spacedPath)),
+      `count=${shellEscapedImages.count} images=${shellEscapedImages.images.length} display=${shellEscapedDisplay}`,
+    );
+
+    const duplicatePathVariantsPrompt = `compare ${spacedPath} and ${shellEscapedPath}`;
+    const duplicatePathVariantsImages = mod.normalizePromptImages(undefined, duplicatePathVariantsPrompt);
+    const duplicatePathVariantsDisplay = displayFn(duplicatePathVariantsPrompt);
+    check(
+      "duplicate raw path variants to same image clean every occurrence without duplicate thumbnails",
+      duplicatePathVariantsImages.count === 1 && duplicatePathVariantsImages.images.length === 1 && !duplicatePathVariantsDisplay.includes(spacedPath) && !duplicatePathVariantsDisplay.includes(shellEscapedPath) && !duplicatePathVariantsDisplay.includes(basename(spacedPath)),
+      `count=${duplicatePathVariantsImages.count} images=${duplicatePathVariantsImages.images.length} display=${duplicatePathVariantsDisplay}`,
+    );
+
+    const directPlusMatchingRawPrompt = `direct pasted image also mentions ${plainPath}`;
+    const directPlusMatchingRaw = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], directPlusMatchingRawPrompt);
+    const directPlusMatchingRawDisplay = displayFn(directPlusMatchingRawPrompt);
+    check(
+      "direct image plus matching raw local path does not duplicate thumbnail count",
+      directPlusMatchingRaw.count === 1 && directPlusMatchingRaw.images.length === 1 && !directPlusMatchingRawDisplay.includes(plainPath) && !directPlusMatchingRawDisplay.includes(basename(plainPath)),
+      `count=${directPlusMatchingRaw.count} images=${directPlusMatchingRaw.images.length} display=${directPlusMatchingRawDisplay}`,
+    );
+
+    const directPlusDifferentRawPrompt = `direct pasted image plus separate image ${separateFileTagPath}`;
+    const directPlusDifferentRaw = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], directPlusDifferentRawPrompt);
+    const directPlusDifferentRawDisplay = displayFn(directPlusDifferentRawPrompt);
+    check(
+      "direct image plus different raw local path keeps both thumbnails",
+      directPlusDifferentRaw.count === 2 && directPlusDifferentRaw.images.length === 2 && !directPlusDifferentRawDisplay.includes(separateFileTagPath) && !directPlusDifferentRawDisplay.includes(basename(separateFileTagPath)),
+      `count=${directPlusDifferentRaw.count} images=${directPlusDifferentRaw.images.length} display=${directPlusDifferentRawDisplay}`,
+    );
+
+    const directPlusSameContentRawCopiesPrompt = `direct pasted image also mentions duplicate temp files ${plainPath} and ${spacedPath}`;
+    const directPlusSameContentRawCopies = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], directPlusSameContentRawCopiesPrompt);
+    const directPlusSameContentRawCopiesDisplay = displayFn(directPlusSameContentRawCopiesPrompt);
+    check(
+      "direct image plus multiple same-content raw local paths de-dupes all fallback thumbnails",
+      directPlusSameContentRawCopies.count === 1 && directPlusSameContentRawCopies.images.length === 1 && !directPlusSameContentRawCopiesDisplay.includes(plainPath) && !directPlusSameContentRawCopiesDisplay.includes(spacedPath) && !directPlusSameContentRawCopiesDisplay.includes(basename(plainPath)) && !directPlusSameContentRawCopiesDisplay.includes(basename(spacedPath)),
+      `count=${directPlusSameContentRawCopies.count} images=${directPlusSameContentRawCopies.images.length} display=${directPlusSameContentRawCopiesDisplay}`,
+    );
+
+    const structuredPrompt = [{ type: "text", text: `structured prompt mentions ${plainPath} please inspect` }];
+    const structuredPromptImages = mod.normalizePromptImages(undefined, structuredPrompt);
+    const structuredPromptDisplay = displayFn(structuredPrompt);
+    check(
+      "structured prompt text parts render and hide local image paths",
+      structuredPromptImages.count === 1 && structuredPromptImages.images.length === 1 && structuredPromptDisplay.includes("structured prompt mentions") && structuredPromptDisplay.includes("please inspect") && !structuredPromptDisplay.includes("[object Object]") && !structuredPromptDisplay.includes(plainPath) && !structuredPromptDisplay.includes(basename(plainPath)),
+      `count=${structuredPromptImages.count} images=${structuredPromptImages.images.length} display=${structuredPromptDisplay}`,
+    );
+
+    const relativePlainPath = relative(ROOT, plainPath);
+    const relativePathImages = mod.normalizePromptImages(undefined, `relative screenshot ${relativePlainPath} should render`);
+    const relativePathDisplay = displayFn(`relative screenshot ${relativePlainPath} should render`);
+    check(
+      "relative local image path renders and is hidden from display prompt",
+      relativePathImages.count === 1 && relativePathImages.images.length === 1 && !relativePathDisplay.includes(relativePlainPath) && !relativePathDisplay.includes(basename(plainPath)),
+      `relative=${relativePlainPath} count=${relativePathImages.count} images=${relativePathImages.images.length} display=${relativePathDisplay}`,
+    );
+
+    const cwdRelativeImages = mod.normalizePromptImages(undefined, `cwd relative screenshot ${cwdRelativePath} should render`);
+    const cwdRelativeDisplay = displayFn(`cwd relative screenshot ${cwdRelativePath} should render`);
+    check(
+      "cwd-relative ./ image path renders and is hidden from display prompt",
+      cwdRelativeImages.count === 1 && cwdRelativeImages.images.length === 1 && !cwdRelativeDisplay.includes(cwdRelativePath) && !cwdRelativeDisplay.includes("relative Screen Shot.png"),
+      `relative=${cwdRelativePath} count=${cwdRelativeImages.count} images=${cwdRelativeImages.images.length} display=${cwdRelativeDisplay}`,
+    );
+
+    const atAbsolutePrompt = `inspect @${plainPath} please`;
+    const atAbsoluteImages = mod.normalizePromptImages(undefined, atAbsolutePrompt);
+    const atAbsoluteDisplay = displayFn(atAbsolutePrompt);
+    check(
+      "@-prefixed absolute image path renders and hides whole token",
+      atAbsoluteImages.count === 1 && atAbsoluteImages.images.length === 1 && !atAbsoluteDisplay.includes("@") && !atAbsoluteDisplay.includes(plainPath) && !atAbsoluteDisplay.includes(basename(plainPath)),
+      `count=${atAbsoluteImages.count} images=${atAbsoluteImages.images.length} display=${atAbsoluteDisplay}`,
+    );
+
+    const atRelativePrompt = `inspect @${cwdRelativePath} please`;
+    const atRelativeImages = mod.normalizePromptImages(undefined, atRelativePrompt);
+    const atRelativeDisplay = displayFn(atRelativePrompt);
+    check(
+      "@-prefixed relative image path renders and hides whole token",
+      atRelativeImages.count === 1 && atRelativeImages.images.length === 1 && !atRelativeDisplay.includes("@") && !atRelativeDisplay.includes(cwdRelativePath) && !atRelativeDisplay.includes("relative Screen Shot.png"),
+      `count=${atRelativeImages.count} images=${atRelativeImages.images.length} display=${atRelativeDisplay}`,
+    );
+
+    const parenthesized = displayFn(`look at (${plainPath}) please`);
+    check(
+      "parenthesized image path is hidden cleanly from display prompt",
+      !parenthesized.includes(plainPath) && !parenthesized.includes(basename(plainPath)) && !/[([{<]\s*[)\]}>]/.test(parenthesized),
+      parenthesized,
+    );
+
+    const bracketed = displayFn(`look at <${plainPath}> please`);
+    check(
+      "angle-bracketed image path is hidden cleanly from display prompt",
+      !bracketed.includes(plainPath) && !bracketed.includes(basename(plainPath)) && !/[([{<]\s*[)\]}>]/.test(bracketed),
+      bracketed,
+    );
+
+    const markdownImagePrompt = `see ![bug screenshot](${plainPath}) before fixing`;
+    const markdownImage = mod.normalizePromptImages(undefined, markdownImagePrompt);
+    const markdownDisplay = displayFn(markdownImagePrompt);
+    check(
+      "markdown image syntax renders as attachment and leaves clean alt text",
+      markdownImage.count === 1 && markdownImage.images.length === 1 && markdownDisplay.includes("bug screenshot") && !markdownDisplay.includes("![") && !markdownDisplay.includes("](") && !markdownDisplay.includes(plainPath) && !markdownDisplay.includes(basename(plainPath)),
+      `count=${markdownImage.count} images=${markdownImage.images.length} display=${markdownDisplay}`,
+    );
+
+    const markdownQueryPrompt = `see ![query shot](${plainPath}?cache=123#frag) now`;
+    const markdownQueryImage = mod.normalizePromptImages(undefined, markdownQueryPrompt);
+    const markdownQueryDisplay = displayFn(markdownQueryPrompt);
+    check(
+      "markdown image with local query/fragment renders and leaves clean alt text",
+      markdownQueryImage.count === 1 && markdownQueryImage.images.length === 1 && markdownQueryDisplay.includes("query shot") && !markdownQueryDisplay.includes("![") && !markdownQueryDisplay.includes("](") && !markdownQueryDisplay.includes("cache=123") && !markdownQueryDisplay.includes("#frag") && !markdownQueryDisplay.includes(basename(plainPath)),
+      `count=${markdownQueryImage.count} images=${markdownQueryImage.images.length} display=${markdownQueryDisplay}`,
+    );
+
+    const markdownTitlePrompt = `see ![titled shot](${plainPath} "local screenshot title") now`;
+    const markdownTitleImage = mod.normalizePromptImages(undefined, markdownTitlePrompt);
+    const markdownTitleDisplay = displayFn(markdownTitlePrompt);
+    check(
+      "markdown image with optional title renders and leaves clean alt text",
+      markdownTitleImage.count === 1 && markdownTitleImage.images.length === 1 && markdownTitleDisplay.includes("titled shot") && !markdownTitleDisplay.includes("local screenshot title") && !markdownTitleDisplay.includes("![") && !markdownTitleDisplay.includes("](") && !markdownTitleDisplay.includes(plainPath) && !markdownTitleDisplay.includes(basename(plainPath)),
+      `count=${markdownTitleImage.count} images=${markdownTitleImage.images.length} display=${markdownTitleDisplay}`,
+    );
+
+    const markdownReferencePrompt = `see ![reference shot][shot]\n\n[shot]: ${plainPath} "local screenshot title"\nnow`;
+    const markdownReferenceImage = mod.normalizePromptImages(undefined, markdownReferencePrompt);
+    const markdownReferenceDisplay = displayFn(markdownReferencePrompt);
+    check(
+      "markdown reference image renders and removes local reference definition",
+      markdownReferenceImage.count === 1 && markdownReferenceImage.images.length === 1 && markdownReferenceDisplay.includes("reference shot") && markdownReferenceDisplay.includes("now") && !markdownReferenceDisplay.includes("![") && !markdownReferenceDisplay.includes("[shot]") && !markdownReferenceDisplay.includes("local screenshot title") && !markdownReferenceDisplay.includes(plainPath) && !markdownReferenceDisplay.includes(basename(plainPath)),
+      `count=${markdownReferenceImage.count} images=${markdownReferenceImage.images.length} display=${markdownReferenceDisplay}`,
+    );
+
+    const markdownShortcutReferencePrompt = `see ![shortcut shot]\n\n[shortcut shot]: ${plainPath} "local screenshot title"\nnow`;
+    const markdownShortcutReferenceImage = mod.normalizePromptImages(undefined, markdownShortcutReferencePrompt);
+    const markdownShortcutReferenceDisplay = displayFn(markdownShortcutReferencePrompt);
+    check(
+      "markdown shortcut reference image renders and removes local reference definition",
+      markdownShortcutReferenceImage.count === 1 && markdownShortcutReferenceImage.images.length === 1 && markdownShortcutReferenceDisplay.includes("shortcut shot") && markdownShortcutReferenceDisplay.includes("now") && !markdownShortcutReferenceDisplay.includes("![") && !markdownShortcutReferenceDisplay.includes("[shortcut shot]") && !markdownShortcutReferenceDisplay.includes("local screenshot title") && !markdownShortcutReferenceDisplay.includes(plainPath) && !markdownShortcutReferenceDisplay.includes(basename(plainPath)),
+      `count=${markdownShortcutReferenceImage.count} images=${markdownShortcutReferenceImage.images.length} display=${markdownShortcutReferenceDisplay}`,
+    );
+
+    const markdownAnglePrompt = `see ![space shot](<${spacedPath}>) now`;
+    const markdownAngleImage = mod.normalizePromptImages(undefined, markdownAnglePrompt);
+    const markdownAngleDisplay = displayFn(markdownAnglePrompt);
+    check(
+      "markdown image syntax with angle-wrapped spaced path renders and leaves clean alt text",
+      markdownAngleImage.count === 1 && markdownAngleImage.images.length === 1 && markdownAngleDisplay.includes("space shot") && !markdownAngleDisplay.includes("![") && !markdownAngleDisplay.includes("](") && !markdownAngleDisplay.includes(basename(spacedPath)),
+      `count=${markdownAngleImage.count} images=${markdownAngleImage.images.length} display=${markdownAngleDisplay}`,
+    );
+
+    const markdownParenPrompt = `see ![paren shot](${parenPath}) now`;
+    const markdownParenImage = mod.normalizePromptImages(undefined, markdownParenPrompt);
+    const markdownParenDisplay = displayFn(markdownParenPrompt);
+    check(
+      "markdown image syntax with parenthesized filename renders and leaves clean alt text",
+      markdownParenImage.count === 1 && markdownParenImage.images.length === 1 && markdownParenDisplay.includes("paren shot") && !markdownParenDisplay.includes("![") && !markdownParenDisplay.includes("](") && !markdownParenDisplay.includes(basename(parenPath)),
+      `count=${markdownParenImage.count} images=${markdownParenImage.images.length} display=${markdownParenDisplay}`,
+    );
+
+    const markdownLinkPrompt = `see [linked screenshot](${plainPath}) before fixing`;
+    const markdownLinkImage = mod.normalizePromptImages(undefined, markdownLinkPrompt);
+    const markdownLinkDisplay = displayFn(markdownLinkPrompt);
+    check(
+      "markdown link to local image renders as attachment and leaves clean link text",
+      markdownLinkImage.count === 1 && markdownLinkImage.images.length === 1 && markdownLinkDisplay.includes("linked screenshot") && !markdownLinkDisplay.includes("[") && !markdownLinkDisplay.includes("](") && !markdownLinkDisplay.includes(plainPath) && !markdownLinkDisplay.includes(basename(plainPath)),
+      `count=${markdownLinkImage.count} images=${markdownLinkImage.images.length} display=${markdownLinkDisplay}`,
+    );
+
+    const markdownEscapedPrompt = `see ![R&amp;D screenshot](${ampPath.replace(/&/g, "&amp;")}) before fixing`;
+    const markdownEscapedImage = mod.normalizePromptImages(undefined, markdownEscapedPrompt);
+    const markdownEscapedDisplay = displayFn(markdownEscapedPrompt);
+    check(
+      "markdown image with entity-escaped local path renders and leaves decoded alt text",
+      markdownEscapedImage.count === 1 && markdownEscapedImage.images.length === 1 && markdownEscapedDisplay.includes("R&D screenshot") && !markdownEscapedDisplay.includes("&amp;") && !markdownEscapedDisplay.includes("![") && !markdownEscapedDisplay.includes("](") && !markdownEscapedDisplay.includes(basename(ampPath)),
+      `count=${markdownEscapedImage.count} images=${markdownEscapedImage.images.length} display=${markdownEscapedDisplay}`,
+    );
+
+    const duplicateMarkdownPrompt = `compare ![before](${plainPath}) and ![after](${plainPath})`;
+    const duplicateMarkdownImage = mod.normalizePromptImages(undefined, duplicateMarkdownPrompt);
+    const duplicateMarkdownDisplay = displayFn(duplicateMarkdownPrompt);
+    check(
+      "duplicate markdown refs to same local image clean all wrappers without duplicate thumbnails",
+      duplicateMarkdownImage.count === 1 && duplicateMarkdownImage.images.length === 1 && duplicateMarkdownDisplay.includes("before") && duplicateMarkdownDisplay.includes("after") && !duplicateMarkdownDisplay.includes("![") && !duplicateMarkdownDisplay.includes("](") && !duplicateMarkdownDisplay.includes(plainPath) && !duplicateMarkdownDisplay.includes(basename(plainPath)),
+      `count=${duplicateMarkdownImage.count} images=${duplicateMarkdownImage.images.length} display=${duplicateMarkdownDisplay}`,
+    );
+
+    const htmlImgPrompt = `see <img src="${plainPath}" alt="bug screenshot"> before fixing`;
+    const htmlImg = mod.normalizePromptImages(undefined, htmlImgPrompt);
+    const htmlImgDisplay = displayFn(htmlImgPrompt);
+    check(
+      "html img tag local src renders and leaves clean alt text",
+      htmlImg.count === 1 && htmlImg.images.length === 1 && htmlImgDisplay.includes("bug screenshot") && !htmlImgDisplay.includes("<img") && !htmlImgDisplay.includes("src=") && !htmlImgDisplay.includes(plainPath) && !htmlImgDisplay.includes(basename(plainPath)),
+      `count=${htmlImg.count} images=${htmlImg.images.length} display=${htmlImgDisplay}`,
+    );
+
+    const htmlImgPairedPrompt = `see <img src="${plainPath}" alt="paired img"></img> before fixing`;
+    const htmlImgPaired = mod.normalizePromptImages(undefined, htmlImgPairedPrompt);
+    const htmlImgPairedDisplay = displayFn(htmlImgPairedPrompt);
+    check(
+      "paired html img tag local src renders and removes closing tag clutter",
+      htmlImgPaired.count === 1 && htmlImgPaired.images.length === 1 && htmlImgPairedDisplay.includes("paired img") && !htmlImgPairedDisplay.includes("<img") && !htmlImgPairedDisplay.includes("</img>") && !htmlImgPairedDisplay.includes("src=") && !htmlImgPairedDisplay.includes(plainPath) && !htmlImgPairedDisplay.includes(basename(plainPath)),
+      `count=${htmlImgPaired.count} images=${htmlImgPaired.images.length} display=${htmlImgPairedDisplay}`,
+    );
+
+    const htmlFigurePrompt = `see <figure><img src="${plainPath}" alt="figure shot"><figcaption>caption text</figcaption></figure> now`;
+    const htmlFigure = mod.normalizePromptImages(undefined, htmlFigurePrompt);
+    const htmlFigureDisplay = displayFn(htmlFigurePrompt);
+    check(
+      "html figure containing local image renders and removes figure/caption tag clutter",
+      htmlFigure.count === 1 && htmlFigure.images.length === 1 && htmlFigureDisplay.includes("figure shot") && htmlFigureDisplay.includes("caption text") && !htmlFigureDisplay.includes("<figure") && !htmlFigureDisplay.includes("</figure>") && !htmlFigureDisplay.includes("<figcaption") && !htmlFigureDisplay.includes("</figcaption>") && !htmlFigureDisplay.includes("<img") && !htmlFigureDisplay.includes(plainPath) && !htmlFigureDisplay.includes(basename(plainPath)),
+      `count=${htmlFigure.count} images=${htmlFigure.images.length} display=${htmlFigureDisplay}`,
+    );
+
+    const htmlImgAltFirstPrompt = `see <img alt='space shot' src="${spacedPath}"> now`;
+    const htmlImgAltFirst = mod.normalizePromptImages(undefined, htmlImgAltFirstPrompt);
+    const htmlImgAltFirstDisplay = displayFn(htmlImgAltFirstPrompt);
+    check(
+      "html img tag with alt before src and spaced local path renders cleanly",
+      htmlImgAltFirst.count === 1 && htmlImgAltFirst.images.length === 1 && htmlImgAltFirstDisplay.includes("space shot") && !htmlImgAltFirstDisplay.includes("<img") && !htmlImgAltFirstDisplay.includes("src=") && !htmlImgAltFirstDisplay.includes(basename(spacedPath)),
+      `count=${htmlImgAltFirst.count} images=${htmlImgAltFirst.images.length} display=${htmlImgAltFirstDisplay}`,
+    );
+
+    const htmlEscapedImgPrompt = `see <img src="${ampPath.replace(/&/g, "&amp;")}" alt="R&amp;D screenshot"> now`;
+    const htmlEscapedImg = mod.normalizePromptImages(undefined, htmlEscapedImgPrompt);
+    const htmlEscapedImgDisplay = displayFn(htmlEscapedImgPrompt);
+    check(
+      "html img tag with entity-escaped local path renders and leaves decoded alt text",
+      htmlEscapedImg.count === 1 && htmlEscapedImg.images.length === 1 && htmlEscapedImgDisplay.includes("R&D screenshot") && !htmlEscapedImgDisplay.includes("&amp;") && !htmlEscapedImgDisplay.includes("<img") && !htmlEscapedImgDisplay.includes("src=") && !htmlEscapedImgDisplay.includes(basename(ampPath)),
+      `count=${htmlEscapedImg.count} images=${htmlEscapedImg.images.length} display=${htmlEscapedImgDisplay}`,
+    );
+
+    const htmlSvgImagePrompt = `see <svg viewBox="0 0 1 1"><image href="${plainPath}" /></svg> now`;
+    const htmlSvgImage = mod.normalizePromptImages(undefined, htmlSvgImagePrompt);
+    const htmlSvgImageDisplay = displayFn(htmlSvgImagePrompt);
+    check(
+      "html svg image href renders and removes svg image markup",
+      htmlSvgImage.count === 1 && htmlSvgImage.images.length === 1 && !htmlSvgImageDisplay.includes("<svg") && !htmlSvgImageDisplay.includes("</svg>") && !htmlSvgImageDisplay.includes("<image") && !htmlSvgImageDisplay.includes("href=") && !htmlSvgImageDisplay.includes(plainPath) && !htmlSvgImageDisplay.includes(basename(plainPath)),
+      `count=${htmlSvgImage.count} images=${htmlSvgImage.images.length} display=${htmlSvgImageDisplay}`,
+    );
+
+    const htmlImgSrcsetPrompt = `see <img srcset="${plainPath} 1x" alt="bug srcset"> before fixing`;
+    const htmlImgSrcset = mod.normalizePromptImages(undefined, htmlImgSrcsetPrompt);
+    const htmlImgSrcsetDisplay = displayFn(htmlImgSrcsetPrompt);
+    check(
+      "html img srcset local image renders and leaves clean alt text",
+      htmlImgSrcset.count === 1 && htmlImgSrcset.images.length === 1 && htmlImgSrcsetDisplay.includes("bug srcset") && !htmlImgSrcsetDisplay.includes("<img") && !htmlImgSrcsetDisplay.includes("srcset=") && !htmlImgSrcsetDisplay.includes(plainPath) && !htmlImgSrcsetDisplay.includes(basename(plainPath)),
+      `count=${htmlImgSrcset.count} images=${htmlImgSrcset.images.length} display=${htmlImgSrcsetDisplay}`,
+    );
+
+    const htmlImgMultiSrcsetPrompt = `see <img srcset="${plainPath} 1x, ${srcsetAltPath} 2x" alt="multi srcset"> before fixing`;
+    const htmlImgMultiSrcset = mod.normalizePromptImages(undefined, htmlImgMultiSrcsetPrompt);
+    const htmlImgMultiSrcsetDisplay = displayFn(htmlImgMultiSrcsetPrompt);
+    check(
+      "html img multi-candidate srcset counts as one semantic attachment",
+      htmlImgMultiSrcset.count === 1 && htmlImgMultiSrcset.images.length === 1 && htmlImgMultiSrcsetDisplay.includes("multi srcset") && !htmlImgMultiSrcsetDisplay.includes("<img") && !htmlImgMultiSrcsetDisplay.includes("srcset=") && !htmlImgMultiSrcsetDisplay.includes(plainPath) && !htmlImgMultiSrcsetDisplay.includes(srcsetAltPath),
+      `count=${htmlImgMultiSrcset.count} images=${htmlImgMultiSrcset.images.length} display=${htmlImgMultiSrcsetDisplay}`,
+    );
+
+    const directPlusHtmlSrcsetSecondCandidatePrompt = `direct pasted image plus html srcset <img srcset="${separateFileTagPath} 1x, ${plainPath} 2x" alt="direct srcset duplicate">`;
+    const directPlusHtmlSrcsetSecondCandidate = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], directPlusHtmlSrcsetSecondCandidatePrompt);
+    const directPlusHtmlSrcsetSecondCandidateDisplay = displayFn(directPlusHtmlSrcsetSecondCandidatePrompt);
+    check(
+      "direct image matching non-first html srcset candidate suppresses whole semantic group",
+      directPlusHtmlSrcsetSecondCandidate.count === 1 && directPlusHtmlSrcsetSecondCandidate.images.length === 1 && directPlusHtmlSrcsetSecondCandidateDisplay.includes("direct srcset duplicate") && !directPlusHtmlSrcsetSecondCandidateDisplay.includes("<img") && !directPlusHtmlSrcsetSecondCandidateDisplay.includes("srcset=") && !directPlusHtmlSrcsetSecondCandidateDisplay.includes(separateFileTagPath) && !directPlusHtmlSrcsetSecondCandidateDisplay.includes(plainPath),
+      `count=${directPlusHtmlSrcsetSecondCandidate.count} images=${directPlusHtmlSrcsetSecondCandidate.images.length} display=${directPlusHtmlSrcsetSecondCandidateDisplay}`,
+    );
+
+    const htmlSourceSrcsetPrompt = `see <source srcset="${plainPath} 1x" media="(min-width: 1px)"> before fixing`;
+    const htmlSourceSrcset = mod.normalizePromptImages(undefined, htmlSourceSrcsetPrompt);
+    const htmlSourceSrcsetDisplay = displayFn(htmlSourceSrcsetPrompt);
+    check(
+      "html source srcset local image renders and removes source tag from display",
+      htmlSourceSrcset.count === 1 && htmlSourceSrcset.images.length === 1 && !htmlSourceSrcsetDisplay.includes("<source") && !htmlSourceSrcsetDisplay.includes("srcset=") && !htmlSourceSrcsetDisplay.includes(plainPath) && !htmlSourceSrcsetDisplay.includes(basename(plainPath)),
+      `count=${htmlSourceSrcset.count} images=${htmlSourceSrcset.images.length} display=${htmlSourceSrcsetDisplay}`,
+    );
+
+    const htmlSourceSrcPrompt = `see <source src="${plainPath}" type="image/png"> before fixing`;
+    const htmlSourceSrc = mod.normalizePromptImages(undefined, htmlSourceSrcPrompt);
+    const htmlSourceSrcDisplay = displayFn(htmlSourceSrcPrompt);
+    check(
+      "html source src local image renders and removes source tag from display",
+      htmlSourceSrc.count === 1 && htmlSourceSrc.images.length === 1 && !htmlSourceSrcDisplay.includes("<source") && !htmlSourceSrcDisplay.includes("src=") && !htmlSourceSrcDisplay.includes(plainPath) && !htmlSourceSrcDisplay.includes(basename(plainPath)),
+      `count=${htmlSourceSrc.count} images=${htmlSourceSrc.images.length} display=${htmlSourceSrcDisplay}`,
+    );
+
+    const htmlSourcePairedPrompt = `see <source src="${plainPath}" type="image/png"></source> before fixing`;
+    const htmlSourcePaired = mod.normalizePromptImages(undefined, htmlSourcePairedPrompt);
+    const htmlSourcePairedDisplay = displayFn(htmlSourcePairedPrompt);
+    check(
+      "paired html source local image renders and removes closing tag clutter",
+      htmlSourcePaired.count === 1 && htmlSourcePaired.images.length === 1 && !htmlSourcePairedDisplay.includes("<source") && !htmlSourcePairedDisplay.includes("</source>") && !htmlSourcePairedDisplay.includes("src=") && !htmlSourcePairedDisplay.includes(plainPath) && !htmlSourcePairedDisplay.includes(basename(plainPath)),
+      `count=${htmlSourcePaired.count} images=${htmlSourcePaired.images.length} display=${htmlSourcePairedDisplay}`,
+    );
+
+    const htmlPicturePrompt = `see <picture><source srcset="${srcsetAltPath} 2x"><img src="${plainPath}" alt="picture shot"></picture> before fixing`;
+    const htmlPicture = mod.normalizePromptImages(undefined, htmlPicturePrompt);
+    const htmlPictureDisplay = displayFn(htmlPicturePrompt);
+    check(
+      "html picture source+img alternatives count as one semantic attachment and leave clean alt text",
+      htmlPicture.count === 1 && htmlPicture.images.length === 1 && htmlPictureDisplay.includes("picture shot") && !htmlPictureDisplay.includes("<picture") && !htmlPictureDisplay.includes("</picture>") && !htmlPictureDisplay.includes("<source") && !htmlPictureDisplay.includes("<img") && !htmlPictureDisplay.includes(plainPath) && !htmlPictureDisplay.includes(srcsetAltPath),
+      `count=${htmlPicture.count} images=${htmlPicture.images.length} display=${htmlPictureDisplay}`,
+    );
+
+    const htmlAnchorPrompt = `see <a href="${plainPath}">linked screenshot</a> before fixing`;
+    const htmlAnchor = mod.normalizePromptImages(undefined, htmlAnchorPrompt);
+    const htmlAnchorDisplay = displayFn(htmlAnchorPrompt);
+    check(
+      "html anchor local image href renders and leaves clean link text",
+      htmlAnchor.count === 1 && htmlAnchor.images.length === 1 && htmlAnchorDisplay.includes("linked screenshot") && !htmlAnchorDisplay.includes("<a") && !htmlAnchorDisplay.includes("href=") && !htmlAnchorDisplay.includes("</a>") && !htmlAnchorDisplay.includes(plainPath) && !htmlAnchorDisplay.includes(basename(plainPath)),
+      `count=${htmlAnchor.count} images=${htmlAnchor.images.length} display=${htmlAnchorDisplay}`,
+    );
+
+    const htmlAnchorFileUrlPrompt = `see <a href="${fileUrl}">space shot</a> now`;
+    const htmlAnchorFileUrl = mod.normalizePromptImages(undefined, htmlAnchorFileUrlPrompt);
+    const htmlAnchorFileUrlDisplay = displayFn(htmlAnchorFileUrlPrompt);
+    check(
+      "html anchor file URL image href renders and leaves clean link text",
+      htmlAnchorFileUrl.count === 1 && htmlAnchorFileUrl.images.length === 1 && htmlAnchorFileUrlDisplay.includes("space shot") && !htmlAnchorFileUrlDisplay.includes("<a") && !htmlAnchorFileUrlDisplay.includes("href=") && !htmlAnchorFileUrlDisplay.includes("</a>") && !htmlAnchorFileUrlDisplay.includes(fileUrl) && !htmlAnchorFileUrlDisplay.includes("Screen%20Shot"),
+      `count=${htmlAnchorFileUrl.count} images=${htmlAnchorFileUrl.images.length} display=${htmlAnchorFileUrlDisplay}`,
+    );
+
+    const htmlAnchorEscapedPrompt = `see <a href="${ampPath.replace(/&/g, "&amp;")}">R&amp;D screenshot</a> now`;
+    const htmlAnchorEscaped = mod.normalizePromptImages(undefined, htmlAnchorEscapedPrompt);
+    const htmlAnchorEscapedDisplay = displayFn(htmlAnchorEscapedPrompt);
+    check(
+      "html anchor entity-escaped image href renders and leaves decoded link text",
+      htmlAnchorEscaped.count === 1 && htmlAnchorEscaped.images.length === 1 && htmlAnchorEscapedDisplay.includes("R&D screenshot") && !htmlAnchorEscapedDisplay.includes("&amp;") && !htmlAnchorEscapedDisplay.includes("<a") && !htmlAnchorEscapedDisplay.includes("href=") && !htmlAnchorEscapedDisplay.includes("</a>") && !htmlAnchorEscapedDisplay.includes(basename(ampPath)),
+      `count=${htmlAnchorEscaped.count} images=${htmlAnchorEscaped.images.length} display=${htmlAnchorEscapedDisplay}`,
+    );
+
+    const fileTagPrompt = `describe attached image\n<file name="${plainPath}"></file>\nplease inspect it`;
+    const fileTagFallback = mod.normalizePromptImages(undefined, fileTagPrompt);
+    check(
+      "image path inside CLI file tag renders as fallback attachment",
+      fileTagFallback.count === 1 && fileTagFallback.images.length === 1,
+      `count=${fileTagFallback.count} images=${fileTagFallback.images.length}`,
+    );
+
+    const fileTagWithDirectImage = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], fileTagPrompt);
+    check(
+      "direct image plus matching CLI file tag does not duplicate thumbnail count",
+      fileTagWithDirectImage.count === 1 && fileTagWithDirectImage.images.length === 1,
+      `count=${fileTagWithDirectImage.count} images=${fileTagWithDirectImage.images.length}`,
+    );
+
+    const separateFileTagPrompt = `describe pasted image and separate file\n<file name="${separateFileTagPath}"></file>\nplease compare both`;
+    const directPlusSeparateFileTag = mod.normalizePromptImages([{ type: "image", data: tinyPngBase64, mimeType: "image/png" }], separateFileTagPrompt);
+    check(
+      "direct image plus different CLI image file tag keeps both thumbnails",
+      directPlusSeparateFileTag.count === 2 && directPlusSeparateFileTag.images.length === 2,
+      `count=${directPlusSeparateFileTag.count} images=${directPlusSeparateFileTag.images.length}`,
+    );
+
+    const fileTagDisplay = displayFn(fileTagPrompt);
+    check(
+      "image CLI file tag is hidden from display prompt after thumbnail extraction",
+      !fileTagDisplay.includes("<file") && !fileTagDisplay.includes("</file>") && !fileTagDisplay.includes(plainPath) && !fileTagDisplay.includes(basename(plainPath)) && fileTagDisplay.includes("describe attached image") && fileTagDisplay.includes("please inspect it"),
+      fileTagDisplay,
+    );
+
+    const selfClosingFileTagPrompt = `describe self-closing image\n<file name="${plainPath}" />\nplease inspect it`;
+    const selfClosingFileTag = mod.normalizePromptImages(undefined, selfClosingFileTagPrompt);
+    const selfClosingFileTagDisplay = displayFn(selfClosingFileTagPrompt);
+    check(
+      "self-closing image CLI file tag renders and is hidden from display prompt",
+      selfClosingFileTag.count === 1 && selfClosingFileTag.images.length === 1 && !selfClosingFileTagDisplay.includes("<file") && !selfClosingFileTagDisplay.includes("</file>") && !selfClosingFileTagDisplay.includes(plainPath) && !selfClosingFileTagDisplay.includes(basename(plainPath)) && selfClosingFileTagDisplay.includes("describe self-closing image") && selfClosingFileTagDisplay.includes("please inspect it"),
+      `count=${selfClosingFileTag.count} images=${selfClosingFileTag.images.length} display=${selfClosingFileTagDisplay}`,
+    );
+
+    const reorderedFileTagPrompt = `describe file metadata\n<file type="image/png" name="${plainPath}"></file>\nplease inspect it`;
+    const reorderedFileTag = mod.normalizePromptImages(undefined, reorderedFileTagPrompt);
+    const reorderedFileTagDisplay = displayFn(reorderedFileTagPrompt);
+    check(
+      "image CLI file tag with attributes before name renders and hides whole marker",
+      reorderedFileTag.count === 1 && reorderedFileTag.images.length === 1 && !reorderedFileTagDisplay.includes("<file") && !reorderedFileTagDisplay.includes("</file>") && !reorderedFileTagDisplay.includes("type=") && !reorderedFileTagDisplay.includes(plainPath) && !reorderedFileTagDisplay.includes(basename(plainPath)) && reorderedFileTagDisplay.includes("describe file metadata") && reorderedFileTagDisplay.includes("please inspect it"),
+      `count=${reorderedFileTag.count} images=${reorderedFileTag.images.length} display=${reorderedFileTagDisplay}`,
+    );
+  } else {
+    check("display prompt hides local image path text but keeps surrounding words", false, "normalizePromptForDisplay missing");
+  }
+} catch (err) {
+  failures++;
+  console.log("TEST FAIL harness exception :: " + (err?.stack || err));
+}
+
+console.log(`METRIC failures=${failures}`);
+console.log(`METRIC tests=${tests}`);

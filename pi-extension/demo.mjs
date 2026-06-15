@@ -187,7 +187,7 @@ if (MODE === "sizes") {
   await new Promise(() => {});
 } else if (MODE === "single") {
   await playSession(sock, "sess-single", "pi-test", SCRIPT_SINGLE);
-  await sleep(3000);
+  await sleep(400);
   sendMsg(sock, { id: "sess-single", type: "remove" });
 } else if (MODE === "overlap") {
   // Long basename the extension would have (pre-truncation) next to a
@@ -199,7 +199,7 @@ if (MODE === "sizes") {
     "pi-pi-pi-pi-pi-pi-pi-pi-pi-pi-pi-pi-pi",
     SCRIPT_OVERLAP,
   );
-  await sleep(3000);
+  await sleep(400);
   sendMsg(sock, { id: "sess-overlap", type: "remove" });
 } else {
   // Three concurrent sessions, staggered so you can watch them stack.
@@ -209,7 +209,7 @@ if (MODE === "sizes") {
   await sleep(1400);
   const c = playSession(sock, "sess-c", "pi-dashboard", SCRIPT_C);
   await Promise.all([a, b, c]);
-  await sleep(3000);
+  await sleep(400);
   sendMsg(sock, { id: "sess-a", type: "remove" });
   await sleep(700);
   sendMsg(sock, { id: "sess-b", type: "remove" });

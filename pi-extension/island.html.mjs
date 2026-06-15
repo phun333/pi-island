@@ -11,8 +11,7 @@
 //   window.island.hoverAt(x, y)         — synthetic hover for click-through windows
 //
 // `data` shape:
-//   { project, status, detail, prompt, promptImages, promptImageCount,
-//     ctxPct, startedAt, frozenElapsed }
+//   { project, status, detail, prompt, ctxPct, startedAt, frozenElapsed }
 //
 // All rows share a single 80ms braille ticker and a single 250ms elapsed
 // ticker — they stay in sync and cost almost nothing.
@@ -334,42 +333,6 @@ body.notch-mode .row:first-child .t-sub { display: none; }
   min-width: 0;
   max-width: 100%;
 }
-.inline-media {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: calc(4px * var(--scale));
-  min-width: 0;
-}
-.inline-thumb {
-  width: calc(20px * var(--scale));
-  height: calc(20px * var(--scale));
-  border-radius: calc(6px * var(--scale));
-  border: 1px solid rgba(255,255,255,0.16);
-  background: rgba(255,255,255,0.08);
-  overflow: hidden;
-  flex: 0 0 auto;
-  position: relative;
-  box-shadow: 0 0 10px rgba(255,255,255,0.07), inset 0 0 0 1px rgba(255,255,255,0.04);
-}
-.inline-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.inline-more {
-  position: absolute;
-  inset: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0,0,0,0.58);
-  color: rgba(255,255,255,0.90);
-  font-size: calc(8px * var(--scale));
-  font-weight: 600;
-  letter-spacing: -0.1px;
-}
 .prompt-reveal {
   max-height: 0;
   opacity: 0;
@@ -398,43 +361,6 @@ body.prompt-hover-enabled .row.has-prompt:not([data-status="done"]):hover .promp
 }
 .prompt-full::before { content: '\u201C'; opacity: 0.5; margin-right: 1px; }
 .prompt-full::after  { content: '\u201D'; opacity: 0.5; margin-left: 1px; }
-.prompt-media {
-  display: flex;
-  flex-wrap: wrap;
-  gap: calc(6px * var(--scale));
-  margin-top: calc(7px * var(--scale));
-}
-.prompt-thumb {
-  width: calc(36px * var(--scale));
-  height: calc(36px * var(--scale));
-  border-radius: calc(9px * var(--scale));
-  border: 1px solid rgba(255,255,255,0.14);
-  background: rgba(255,255,255,0.08);
-  overflow: hidden;
-  flex: 0 0 auto;
-  position: relative;
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
-}
-.prompt-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-.prompt-more {
-  position: absolute;
-  inset: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0,0,0,0.58);
-  color: rgba(255,255,255,0.90);
-  font-size: calc(11px * var(--scale));
-  font-weight: 500;
-  letter-spacing: -0.1px;
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
-}
 
 .meta {
   padding-left: calc(8px * var(--scale));
@@ -564,15 +490,6 @@ body.prompt-hover-enabled .row.has-prompt:not([data-status="done"]):hover .promp
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  function imageSrc(img) {
-    if (!img || typeof img.data !== 'string' || !img.data) return '';
-    var data = img.data.trim();
-    if (data.indexOf('data:') === 0) return data;
-    data = data.replace(/\s+/g, '');
-    var mime = typeof img.mimeType === 'string' && img.mimeType ? img.mimeType : 'image/png';
-    return 'data:' + mime + ';base64,' + data;
   }
 
   // Split the elapsed readout into a "main" unit and a "sub" unit so the
@@ -768,21 +685,6 @@ body.prompt-hover-enabled .row.has-prompt:not([data-status="done"]):hover .promp
     applySyntheticHover();
   });
 
-  function renderPromptImageTiles(promptImages, promptImageCount, maxTiles, thumbClass, moreClass) {
-    if (promptImageCount <= 0) return '';
-    var thumbCount = Math.min(promptImages.length, maxTiles);
-    var html = '';
-    for (var i = 0; i < thumbCount; i++) {
-      var src = imageSrc(promptImages[i]);
-      if (!src) continue;
-      var more = promptImageCount > maxTiles && i === maxTiles - 1
-        ? '<span class="' + moreClass + '">+' + (promptImageCount - maxTiles) + '</span>'
-        : '';
-      html += '<span class="' + thumbClass + '"><img src="' + esc(src) + '" alt="Attached image ' + (i + 1) + '">' + more + '</span>';
-    }
-    return html;
-  }
-
   function renderRowContent(row) {
     var d = row.data;
     var statusKey = STATUS[d.status] ? d.status : 'thinking';
@@ -791,12 +693,9 @@ body.prompt-hover-enabled .row.has-prompt:not([data-status="done"]):hover .promp
     var isDone = statusKey === 'done';
 
     // Prompt is deliberately not rendered inline anymore. Keep the compact
-    // row focused on project + live status; reveal the prompt + attachments
-    // underneath on hover. The middle slot may show transient tool detail.
+    // row focused on project + live status; reveal only text underneath on hover.
     var prompt = d.prompt || '';
-    var promptImages = Array.isArray(d.promptImages) ? d.promptImages : [];
-    var promptImageCount = Math.max(promptImages.length, Number(d.promptImageCount) || 0);
-    row.el.classList.toggle('has-prompt', !isDone && (!!prompt || promptImageCount > 0));
+    row.el.classList.toggle('has-prompt', !isDone && !!prompt);
 
     // LEFT: braille + project. Done rows hide the stopped spinner + project
     // so the completion state can collapse into a centered confirmation.
@@ -804,15 +703,11 @@ body.prompt-hover-enabled .row.has-prompt:not([data-status="done"]):hover .promp
                BRAILLE[brailleIdx] + '</span>';
     if (!isDone && d.project) left += '<span class="project">' + esc(d.project) + '</span>';
 
-    // MIDDLE: transient tool detail. At turn start, if there is no tool
-    // detail yet, show tiny image thumbnails so pasted clipboard images are
-    // visibly acknowledged even before the hover reveal opens.
+    // MIDDLE: transient tool detail only. Image attachment previews were
+    // removed, so an idle thinking row leaves the center slot empty.
     var mid = '';
     if (!isDone && d.detail) {
       mid = '<span class="detail">' + esc(d.detail) + '</span>';
-    } else if (!isDone && promptImageCount > 0 && promptImages.length > 0) {
-      var inlineTiles = renderPromptImageTiles(promptImages, promptImageCount, 3, 'inline-thumb', 'inline-more');
-      if (inlineTiles) mid = '<span class="inline-media" aria-label="Attached images">' + inlineTiles + '</span>';
     }
 
     // RIGHT: status text + meta
@@ -828,7 +723,7 @@ body.prompt-hover-enabled .row.has-prompt:not([data-status="done"]):hover .promp
         right += '<span class="mono t-elapsed">' + fmtElapsedHTML(t) + '</span>';
       }
       if (d.ctxPct != null) {
-        if (d.startedAt) right += '<span class="sep">\u00b7</span>';
+        if (d.startedAt) right += '<span class="sep">·</span>';
         var pct = Math.max(0, Math.min(100, Math.round(d.ctxPct)));
         var color = ctxColor(pct);
         right += '<span class="ctx-ring" style="--ctx-color:' + color + '" data-tooltip="Context ' + pct + '%" aria-label="Context ' + pct + '%">' +
@@ -844,13 +739,8 @@ body.prompt-hover-enabled .row.has-prompt:not([data-status="done"]):hover .promp
     }
 
     var promptReveal = '';
-    if (!isDone && (prompt || promptImageCount > 0)) {
-      var revealInner = prompt ? '<div class="prompt-full">' + esc(prompt) + '</div>' : '';
-      if (promptImageCount > 0) {
-        var tiles = renderPromptImageTiles(promptImages, promptImageCount, 4, 'prompt-thumb', 'prompt-more');
-        if (tiles) revealInner += '<div class="prompt-media">' + tiles + '</div>';
-      }
-      promptReveal = '<div class="prompt-reveal">' + revealInner + '</div>';
+    if (!isDone && prompt) {
+      promptReveal = '<div class="prompt-reveal"><div class="prompt-full">' + esc(prompt) + '</div></div>';
     }
 
     row.el.dataset.spin = s.spin ? 'true' : 'false';
@@ -882,19 +772,6 @@ body.prompt-hover-enabled .row.has-prompt:not([data-status="done"]):hover .promp
   // message_update frames can arrive rapidly while the agent streams.
   // Avoid replacing row.innerHTML when rendered fields are unchanged so
   // the status text animation keeps a continuous phase instead of restarting.
-  function samePromptImages(a, b) {
-    a = Array.isArray(a) ? a : [];
-    b = Array.isArray(b) ? b : [];
-    if (a === b) return true;
-    if (a.length !== b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] === b[i]) continue;
-      if (!a[i] || !b[i]) return false;
-      if (a[i].data !== b[i].data || a[i].mimeType !== b[i].mimeType) return false;
-    }
-    return true;
-  }
-
   function sameRenderedData(a, b) {
     return a.project === b.project &&
       a.status === b.status &&
@@ -903,9 +780,7 @@ body.prompt-hover-enabled .row.has-prompt:not([data-status="done"]):hover .promp
       a.startedAt === b.startedAt &&
       a.frozenElapsed === b.frozenElapsed &&
       a.ctxPct === b.ctxPct &&
-      a.rowScale === b.rowScale &&
-      (Number(a.promptImageCount) || 0) === (Number(b.promptImageCount) || 0) &&
-      samePromptImages(a.promptImages, b.promptImages);
+      a.rowScale === b.rowScale;
   }
 
   function upsertRow(id, data) {

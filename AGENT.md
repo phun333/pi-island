@@ -124,7 +124,7 @@ The companion shuts itself down 6 s after the last client disconnects
 | pi event              | What we do                                                               | Sends status      |
 |-----------------------|--------------------------------------------------------------------------|-------------------|
 | `session_start`       | Stash the `ctx` for later `getContextUsage()` calls. Do **not** show. | –                 |
-| `before_agent_start`  | Capture full `evt.prompt` plus `evt.images` into prompt reveal state.    | –                 |
+| `before_agent_start`  | Capture text from `evt.prompt` into prompt reveal state.                 | –                 |
 | `agent_start`         | Clear active-tool count, reset timer, emit first update.                 | `thinking`        |
 | `message_update`      | If no tool is running, refresh the row with current elapsed / ctx%.      | `thinking`        |
 | `tool_execution_start`| Increment active-tool count, emit tool-specific status.                  | per §4.2 below    |
@@ -153,21 +153,16 @@ README color table.
 
 ### 4.3. Prompt handling
 
-- User prompt is captured in `before_agent_start` via `normalizePrompt()`
-  — whitespace is collapsed, but the hover reveal keeps the full text.
-- `evt.images` from `before_agent_start` is forwarded as `promptImages`
-  (first 4 base64 image payloads + `promptImageCount` for overflow).
-- If the prompt text itself contains a readable local image path (for
-  example `/var/.../clipboard.png`, `~/Desktop/a.jpg`, a path with literal
-  spaces, an extensionless sniffable image file, or a `file://` URL), the
-  extension treats it as a prompt image fallback and shows it in the same
-  attachment tiles.
-- The compact row no longer renders `d.prompt` inline. `d.detail` may
-  appear in the absolute-centered middle slot; before a tool detail exists,
-  attached prompt images also show as tiny middle-slot thumbnails. The full
-  prompt plus up to 4 attachment tiles are revealed under the row on hover.
-  Once a row reaches `done`, hover reveal is disabled so the row can collapse to
-  the centered completion state before retracting.
+- User prompt text is captured in `before_agent_start` via
+  `normalizePromptForDisplay()` — whitespace is collapsed before it is sent
+  to the WebView.
+- Image/file payload metadata is ignored. The island does not forward
+  `evt.images`, does not read local image paths, and does not render image
+  thumbnails/previews.
+- The compact row does not render `d.prompt` inline. `d.detail` may appear
+  in the absolute-centered middle slot; the text prompt is revealed under
+  the row on hover. Once a row reaches `done`, hover reveal is disabled so
+  the row can collapse to the centered completion state before retracting.
 - The native hosts keep the island click-through, so hover is synthetic:
   macOS forwards global mouse coordinates via `NSEvent` and Windows polls
   `Cursor.Position`; both call `window.island.hoverAt(x, y)`.
@@ -190,7 +185,7 @@ README color table.
 
 `/island` is the single entry point — no more `/island2`. With no args it
 opens a settings menu rendered via `ctx.ui.custom()` + pi-tui's
-`SettingsList` (the same drop-down UX as pi's own `/settings`). Four
+`SettingsList` (the same drop-down UX as pi's own `/settings`). Five
 rows, each Enter/Space cycles its values:
 
 | Setting      | Values                               | Apply method                           |
@@ -199,10 +194,11 @@ rows, each Enter/Space cycles its values:
 | Size         | `small` / `medium` / `large` / `xlarge` | Live (socket `scale` message).      |
 | Screen       | `primary` / `active` / `2` / `3` …  | Respawn companion (NSWindow fixed).    |
 | Notch wrap   | `auto` / `normal` / `notch`          | Respawn companion (read at spawn).     |
+| Prompt hover | `enabled` / `disabled`               | Live (socket `prompt-hover` message).  |
 
-All four fields are persisted in `~/.pi/pi-island.json`:
+All five fields are persisted in `~/.pi/pi-island.json`:
 ```json
-{ "enabled": true, "scale": "medium", "screen": "primary", "notchMode": "auto" }
+{ "enabled": true, "scale": "medium", "screen": "primary", "notchMode": "auto", "promptHover": true }
 ```
 Missing fields fall back to defaults, so a v0.1.x pref file (just
 `{"enabled": true}`) upgrades cleanly with no user action.
@@ -213,6 +209,7 @@ Missing fields fall back to defaults, so a v0.1.x pref file (just
 /island size   <small|medium|large|xlarge>
 /island screen <primary|active|2|3|...>
 /island notch  <auto|normal|notch>
+/island prompt <on|off|toggle>
 /island reload | reset                      # v0.2.1: force companion respawn
 ```
 
@@ -247,9 +244,7 @@ One JSON object per line. Writer: `writeMessage` in `index.ts`. Reader:
   "project":        "pi-auth",         // basename(cwd), truncated to ≤20 chars
   "status":         "editing",         // see STATUS table in island.html.mjs
   "detail":         "login.ts",        // optional, tool-specific short string
-  "prompt":         "fix the auth bug",// full prompt, whitespace-collapsed
-  "promptImages":   [{ "data": "...", "mimeType": "image/png" }], // first 4 images
-  "promptImageCount": 1,               // total image attachments, for +N overflow
+  "prompt":         "fix the auth bug",// prompt text, whitespace-collapsed
   "ctxPct":         34,                // 0-100, null if unknown
   "startedAt":      1713622000000,     // ms epoch, set on agent_start
   "frozenElapsed":  null,              // non-null ms = stop ticking timer
@@ -264,6 +259,9 @@ One JSON object per line. Writer: `writeMessage` in `index.ts`. Reader:
 
 // Size preset — flips the global --scale CSS var (live, no respawn)
 { "id": "...", "type": "scale",   "scale": "small" | "medium" | "large" | "xlarge" }
+
+// Prompt hover toggle — flips body.prompt-hover-enabled (live, no respawn)
+{ "id": "...", "type": "prompt-hover", "enabled": true | false }
 
 // Graceful companion shutdown — client's next ensureConnection() spawns a
 // fresh instance that re-reads ~/.pi/pi-island.json (used for screen and
@@ -294,11 +292,12 @@ type requires an explicit handler in `companion.mjs` — it won't just
 - Required on `update`: `id`, `type`, and a `status` from the vocabulary
   below. Updates without a valid `status` are dropped at the companion
   (another ghost-row safety net).
-- Everything else is optional. Companion passes the JSON straight
-  through; the WebView's `upsertRow` merges with previous state, so a
+- Everything else is optional. Companion strips legacy image-preview
+  fields (`promptImages` / `promptImageCount`) and passes the remaining
+  JSON through; the WebView's `upsertRow` merges with previous state, so a
   partial update (`{id, type, status, detail}`) keeps the earlier
-  `prompt` / `promptImages` / `startedAt`. This is why the demo can omit
-  `prompt` on every step after the first.
+  `prompt` / `startedAt`. This is why the demo can omit `prompt` on every
+  step after the first.
 
 **Status vocabulary** — must match keys in the `STATUS` table in
 `island.html.mjs`:
@@ -309,16 +308,17 @@ thinking | reading | editing | writing | running | searching | done | error
 Unknown statuses fall back to `thinking` visual.
 
 **Preference schema** (`~/.pi/pi-island.json`) — owned by `index.ts`,
-but also read directly by `companion.mjs` on spawn for `screen` and
-`notchMode` (settings that determine NSWindow geometry and can't be
-changed without a fresh window). All fields are optional; missing
-values fall back to defaults.
+but also read directly by `companion.mjs` on spawn for `screen`,
+`notchMode`, and the initial `promptHover` flag. Geometry settings still
+require a fresh window; prompt hover can also be toggled live over the
+socket. All fields are optional; missing values fall back to defaults.
 ```jsonc
 {
   "enabled":     true,        // default true
   "scale":       "medium",    // default "medium"  (one of SCALES in §12)
   "screen":      "primary",   // default "primary" | "active" | "2" | "3" | …
   "notchMode":   "auto",      // default "auto"    | "normal" | "notch"
+  "promptHover": true,        // default true
   "lastVersion": "0.2.1"      // (v0.2.1+) pi-island version that last ran;
                               // drives the one-time upgrade notify
 }

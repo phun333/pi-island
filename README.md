@@ -123,7 +123,7 @@ For muscle memory and scripts:
 
 Run pi in multiple terminals — each session gets its own row, stacked into one continuous capsule sized to the longest row.
 
-Prompt hover also shows image attachments. If the prompt contains a readable local image path like `/var/.../clipboard.png`, `~/Desktop/screenshot.jpg`, a path with spaces, or a `file://` URL, pi-island renders it as an image tile in the hover reveal. Before tool details appear, attached images also show as tiny compact-row thumbnails.
+Prompt hover reveals text only. Image attachments and local image paths are no longer rendered as thumbnails/previews.
 
 ## How it works
 

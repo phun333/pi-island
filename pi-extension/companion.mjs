@@ -10,8 +10,7 @@
 // Protocol (client → server, one JSON object per line):
 //   { "id": "<session-uuid>", "type": "update",
 //     "project": "...", "status": "thinking", "detail": "...",
-//     "prompt": "...", "promptImages": [{ "data": "...", "mimeType": "image/png" }],
-//     "promptImageCount": 1, "ctxPct": 34, "frozenElapsed": <ms>|null }
+//     "prompt": "...", "ctxPct": 34, "frozenElapsed": <ms>|null }
 //   { "id": "<session-uuid>", "type": "remove" }
 //   { "id": "<session-uuid>", "type": "mode",         "mode":  "normal"|"notch" }
 //   { "id": "<session-uuid>", "type": "scale",        "scale": "small"|"medium"|"large"|"xlarge" }
@@ -257,6 +256,10 @@ const server = createServer((sock) => {
       // Require a valid status — empty / unknown statuses are dropped at
       // the boundary so malformed clients can't create ghost rows.
       if (!msg.id || !VALID_STATUS.has(msg.status)) return;
+      // Image previews are no longer supported. Drop legacy base64 payloads
+      // from older clients instead of forwarding them to the WebView.
+      delete msg.promptImages;
+      delete msg.promptImageCount;
       const merged = Object.assign({}, rowState.get(msg.id) || {}, msg);
       rowState.set(msg.id, merged);
       send(`window.island.upsertRow(${JSON.stringify(msg.id)},${JSON.stringify(msg)})`);
